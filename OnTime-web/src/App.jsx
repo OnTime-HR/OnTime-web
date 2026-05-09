@@ -1,9 +1,15 @@
+import "./App.css";
+import { auth } from "./services/firebase";
+
 function App() {
+
+  console.log(auth);
+
   return (
-    <div className="text-4xl font-bold text-center mt-20">
-      EMS Dashboard 🚀
+    <div>
+      <h1>Firebase Connected Successfully 🚀</h1>
     </div>
-  )
+  );
 }
 
-export default App
+export default App;
