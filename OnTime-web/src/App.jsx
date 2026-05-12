@@ -1,15 +1,7 @@
-import "./App.css";
-import { auth } from "./services/firebase";
+import AppRoutes from "./routes/AppRoutes";
 
 function App() {
-
-  console.log(auth);
-
-  return (
-    <div>
-      <h1>Firebase Connected Successfully 🚀</h1>
-    </div>
-  );
+  return <AppRoutes />;
 }
 
 export default App;
