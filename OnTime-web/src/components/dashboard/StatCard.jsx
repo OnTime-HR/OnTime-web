@@ -1,38 +1,16 @@
-const StatCard = ({
-  title,
-  value,
-  subtitle,
-  icon,
-  iconBg,
-  valueColor,
-}) => {
-  return (
-    <div className="bg-white rounded-3xl p-7 border border-orange-100 shadow-sm hover:shadow-md transition-all duration-300">
+import React from 'react';
 
-      {/* Icon */}
-      <div
-        className={`w-14 h-14 rounded-2xl flex items-center justify-center ${iconBg}`}
-      >
+const StatCard = ({ icon, label, value, subtext, iconBg, textColor }) => {
+  return (
+    <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm flex flex-col gap-3 flex-1">
+      <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${iconBg}`}>
         {icon}
       </div>
-
-      {/* Content */}
-      <div className="mt-6">
-
-        <p className="text-gray-500 text-lg">
-          {title}
-        </p>
-
-        <h2 className={`text-5xl font-bold mt-3 ${valueColor}`}>
-          {value}
-        </h2>
-
-        <p className="text-gray-400 mt-3">
-          {subtitle}
-        </p>
-
+      <div>
+        <p className="text-gray-500 text-sm font-medium">{label}</p>
+        <h2 className={`text-4xl font-bold my-1 ${textColor}`}>{value}</h2>
+        <p className="text-gray-400 text-xs">{subtext}</p>
       </div>
-
     </div>
   );
 };

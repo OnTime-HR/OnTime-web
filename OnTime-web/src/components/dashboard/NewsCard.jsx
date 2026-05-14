@@ -1,93 +1,42 @@
-const NewsCard = () => {
-  return (
-    <div className="bg-white rounded-3xl border border-orange-100 shadow-sm overflow-hidden h-[520px]">
+// src/components/dashboard/NewsCard.jsx
+import React from 'react';
 
-      {/* Header */}
-      <div className="p-6 border-b border-gray-100 flex items-center justify-between">
-
-        <div>
-
-          <h2 className="text-3xl font-bold text-orange-500">
-            News & Announcements
-          </h2>
-
-          <p className="text-gray-500 mt-1">
-            Latest company updates
+const NewsCard = ({ title, description, time, image, isFeatured }) => {
+  if (isFeatured) {
+    return (
+      <div className="relative rounded-xl overflow-hidden aspect-[1.4/1] mb-6 group cursor-pointer">
+        <img 
+          src={image} 
+          alt={title} 
+          className="w-full h-full object-cover" 
+        />
+        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent flex flex-col justify-end p-4">
+          <span className="bg-[#3B82F6] text-white text-[10px] font-bold px-2 py-0.5 rounded w-fit mb-2">
+            Published
+          </span>
+          <h3 className="text-white font-bold text-sm leading-tight">
+            {title}
+          </h3>
+          <p className="text-gray-200 text-[10px] mt-1 line-clamp-2">
+            {description}
           </p>
-
         </div>
-
-        <button className="bg-orange-500 text-white px-5 py-3 rounded-2xl shadow-md hover:shadow-lg transition-all">
-
-          New Post
-
-        </button>
-
       </div>
+    );
+  }
 
-      {/* Image Section */}
-      <div className="p-6">
-
-        <div className="relative rounded-3xl overflow-hidden">
-
-          <img
-            src="https://images.unsplash.com/photo-1521737604893-d14cc237f11d"
-            alt="meeting"
-            className="w-full h-[240px] object-cover"
-          />
-
-          {/* Overlay */}
-          <div className="absolute inset-0 bg-black/40 flex flex-col justify-end p-6">
-
-            <span className="bg-blue-500 text-white text-sm px-3 py-1 rounded-xl w-fit">
-              Published
-            </span>
-
-            <h3 className="text-white text-3xl font-bold mt-4">
-              Q4 Strategy Meeting
-            </h3>
-
-            <p className="text-white/80 mt-3 text-lg">
-              Mandatory attendance for all department heads.
-            </p>
-
-          </div>
-
+  return (
+    <div className="flex gap-3 py-3 border-b border-gray-50 last:border-0 group cursor-pointer">
+      <img src={image} alt={title} className="w-12 h-12 rounded-lg object-cover flex-shrink-0" />
+      <div className="flex-1 min-w-0">
+        <div className="flex justify-between items-start">
+          <h4 className="text-[11px] font-bold text-gray-800 truncate">{title}</h4>
+          <span className="text-[9px] text-gray-400 whitespace-nowrap">{time}</span>
         </div>
-
-        {/* Additional News */}
-        <div className="mt-6 space-y-4">
-
-          {/* Item */}
-          <div className="p-4 rounded-2xl bg-orange-50">
-
-            <p className="font-semibold text-gray-900">
-              Office Renovation Update
-            </p>
-
-            <p className="text-sm text-gray-500 mt-1">
-              2 hours ago
-            </p>
-
-          </div>
-
-          {/* Item */}
-          <div className="p-4 rounded-2xl bg-gray-50">
-
-            <p className="font-semibold text-gray-900">
-              Employee Wellness Program
-            </p>
-
-            <p className="text-sm text-gray-500 mt-1">
-              Yesterday
-            </p>
-
-          </div>
-
-        </div>
-
+        <p className="text-[10px] text-gray-500 line-clamp-2 mt-0.5 leading-normal">
+          {description}
+        </p>
       </div>
-
     </div>
   );
 };

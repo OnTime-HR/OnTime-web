@@ -1,19 +1,22 @@
-import Sidebar from "../components/dashboard/Sidebar";
+// src/layouts/DashboardLayout.jsx
+import React from 'react';
+import Sidebar from '../components/dashboard/Sidebar';
+import Topbar from '../components/dashboard/Topbar';
 
 const DashboardLayout = ({ children }) => {
   return (
-    <div className="flex min-h-screen bg-[#F5F5F7]">
-
-      {/* Sidebar */}
+    <div className="flex min-h-screen bg-[#F8F9FA]">
+      {/* Sidebar is fixed at w-72 */}
       <Sidebar />
-
-      {/* Main */}
-      <div className="flex-1 overflow-auto">
-
-        {children}
-
+      
+      <div className="flex-1 flex flex-col ml-72">
+        <Topbar />
+        
+        {/* pt-24 (96px) ensures content starts below the fixed Topbar */}
+        <main className="pt-24 min-h-screen">
+          {children}
+        </main>
       </div>
-
     </div>
   );
 };

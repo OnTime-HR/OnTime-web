@@ -1,47 +1,31 @@
-import { Search, Bell } from "lucide-react";
+// src/components/dashboard/Topbar.jsx
+import React from 'react';
+import { Search, Bell } from 'lucide-react';
 
 const Topbar = () => {
   return (
-    <div className="flex items-center justify-between px-8 py-6 bg-[#F5F5F7] border-b border-gray-200">
-
-      {/* Left */}
+    // 'fixed' keeps it at the top, 'left-72' matches your sidebar width, 'z-10' keeps it on top
+    <div className="fixed top-0 left-72 right-0 h-24 bg-[#F8F9FA]/90 backdrop-blur-md z-10 px-10 flex items-center justify-between border-b border-gray-100">
       <div>
-
-        <h1 className="text-5xl font-bold text-gray-900">
-          Dashboard
-        </h1>
-
-        <p className="text-gray-500 mt-2 text-lg">
-          Real-time operational metrics and announcements
-        </p>
-
+        <h1 className="text-2xl font-bold text-gray-900 leading-tight">Dashboard</h1>
+        <p className="text-gray-500 text-sm">Real-time operational metrics and announcements</p>
       </div>
-
-      {/* Right */}
-      <div className="flex items-center gap-5">
-
-        {/* Search */}
-        <div className="flex items-center gap-3 bg-orange-500 px-5 py-4 rounded-full shadow-lg w-[320px]">
-
-          <Search size={20} className="text-white" />
-
-          <input
-            type="text"
-            placeholder="Search..."
-            className="bg-transparent outline-none text-white placeholder:text-white w-full"
+      
+      <div className="flex items-center gap-4">
+        <div className="relative">
+          <input 
+            type="text" 
+            placeholder="Search..." 
+            className="bg-[#F9A825] text-white placeholder-orange-100 rounded-full pl-6 pr-12 py-2.5 w-80 outline-none shadow-sm"
           />
-
+          <Search className="absolute right-5 top-3 text-white" size={18} />
         </div>
 
-        {/* Notification */}
-        <button className="w-14 h-14 rounded-full bg-orange-100 flex items-center justify-center shadow-sm">
-
-          <Bell size={20} className="text-orange-500" />
-
-        </button>
-
+        <div className="p-2.5 bg-[#FFF4E5] rounded-full text-[#F9A825] relative cursor-pointer border border-orange-50">
+          <div className="absolute top-2.5 right-2.5 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white"></div>
+          <Bell size={22} />
+        </div>
       </div>
-
     </div>
   );
 };

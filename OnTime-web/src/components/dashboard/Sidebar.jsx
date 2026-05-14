@@ -1,120 +1,52 @@
-import {
-  LayoutDashboard,
-  Users,
-  MapPinned,
-  CircleCheckBig,
-  Newspaper,
-  Settings,
-  LogOut,
-} from "lucide-react";
-
-const menuItems = [
-  {
-    title: "Dashboard",
-    icon: LayoutDashboard,
-    active: true,
-  },
-  {
-    title: "User and Role Management",
-    icon: Users,
-  },
-  {
-    title: "Geofencing and Operations",
-    icon: MapPinned,
-  },
-  {
-    title: "Approvals and Reports",
-    icon: CircleCheckBig,
-  },
-  {
-    title: "News & Events",
-    icon: Newspaper,
-  },
-  {
-    title: "Settings",
-    icon: Settings,
-  },
-];
+// src/components/dashboard/Sidebar.jsx
+import React from 'react';
+import { LayoutGrid, Users, MapPin, FileCheck, MessageSquare, Settings, LogOut } from 'lucide-react';
 
 const Sidebar = () => {
+  const menuItems = [
+    { icon: <LayoutGrid size={22} />, label: 'Dashboard', active: true },
+    { icon: <Users size={22} />, label: 'User and Role Management' },
+    { icon: <MapPin size={22} />, label: 'Geofencing and Operations' },
+    { icon: <FileCheck size={22} />, label: 'Approvals and Reports' },
+    { icon: <MessageSquare size={22} />, label: 'News & Events' },
+    { icon: <Settings size={22} />, label: 'Settings' },
+  ];
+
   return (
-    <div className="w-[290px] min-h-screen bg-white border-r border-gray-200 flex flex-col justify-between">
+    <div className="w-72 h-screen bg-[#F0F2F5] border-r border-gray-200 flex flex-col p-5 fixed left-0 top-0">
+      {/* Brand Header */}
+      <div className="flex items-center gap-4 px-2 mb-12">
+        <div className="w-12 h-12 bg-[#E8D5C4] rounded-full flex-shrink-0"></div>
+        <div>
+          <h2 className="text-base font-bold text-gray-800 leading-tight">Admin Panel</h2>
+          <p className="text-xs text-gray-500 font-medium">Management Console</p>
+        </div>
+      </div>
 
-      {/* Top */}
-      <div>
-
-        {/* Logo */}
-        <div className="p-6 border-b border-gray-100">
-
-          <div className="flex items-center gap-3">
-
-            <div className="w-12 h-12 rounded-full bg-orange-200 flex items-center justify-center">
-
-              <div className="w-2 h-2 rounded-full bg-white" />
-
-            </div>
-
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">
-                Admin Panel
-              </h1>
-
-              <p className="text-sm text-gray-500">
-                Management Console
-              </p>
-            </div>
-
+      {/* Nav Links */}
+      <nav className="flex-1 space-y-2">
+        {menuItems.map((item, index) => (
+          <div
+            key={index}
+            className={`flex items-center gap-4 px-4 py-3.5 rounded-xl cursor-pointer transition-all ${
+              item.active 
+                ? 'bg-[#F9E8D2] text-[#F9A825] font-bold shadow-sm' 
+                : 'text-gray-700 hover:bg-gray-200 font-medium'
+            }`}
+          >
+            <span className={item.active ? 'text-[#F9A825]' : 'text-gray-600'}>
+              {item.icon}
+            </span>
+            <span className="text-[14px]">{item.label}</span>
           </div>
+        ))}
+      </nav>
 
-        </div>
-
-        {/* Menu */}
-        <div className="p-4 space-y-2">
-
-          {menuItems.map((item, index) => {
-
-            const Icon = item.icon;
-
-            return (
-              <button
-                key={index}
-                className={`w-full flex items-center gap-3 px-4 py-4 rounded-2xl transition-all duration-200
-                ${
-                  item.active
-                    ? "bg-orange-100 text-orange-500 shadow-sm"
-                    : "text-gray-700 hover:bg-gray-100"
-                }`}
-              >
-
-                <Icon size={20} />
-
-                <span className="font-medium text-[15px]">
-                  {item.title}
-                </span>
-
-              </button>
-            );
-          })}
-
-        </div>
-
+      {/* Log Out */}
+      <div className="flex items-center gap-4 px-4 py-6 text-red-500 cursor-pointer border-t border-gray-300 hover:bg-red-50 transition-colors mt-auto">
+        <LogOut size={22} />
+        <span className="text-[14px] font-bold">Log Out</span>
       </div>
-
-      {/* Bottom */}
-      <div className="p-6">
-
-        <button className="flex items-center gap-3 text-red-500">
-
-          <LogOut size={20} />
-
-          <span className="font-medium">
-            Log Out
-          </span>
-
-        </button>
-
-      </div>
-
     </div>
   );
 };
