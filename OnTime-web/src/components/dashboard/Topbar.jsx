@@ -2,13 +2,13 @@
 import React from 'react';
 import { Search, Bell } from 'lucide-react';
 
-const Topbar = () => {
+const Topbar = ({ title = "Dashboard", subtitle = "Real-time operational metrics and announcements" }) => {
   return (
     // 'fixed' keeps it at the top, 'left-72' matches your sidebar width, 'z-10' keeps it on top
     <div className="fixed top-0 left-72 right-0 h-24 bg-[#F8F9FA]/90 backdrop-blur-md z-10 px-10 flex items-center justify-between border-b border-gray-100">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900 leading-tight">Dashboard</h1>
-        <p className="text-gray-500 text-sm">Real-time operational metrics and announcements</p>
+        <h1 className="text-2xl font-bold text-gray-900 leading-tight">{title}</h1>
+        <p className="text-gray-500 text-sm">{subtitle}</p>
       </div>
       
       <div className="flex items-center gap-4">

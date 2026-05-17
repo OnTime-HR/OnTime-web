@@ -3,6 +3,7 @@ import React from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import DashboardLayout from '../layouts/DashboardLayout';
 import DashboardPage from '../pages/dashboard/DashboardPage';
+import UserManagementPage from '../pages/users/UserManagementPage';
 
 const AppRoutes = () => {
   return (
@@ -11,12 +12,19 @@ const AppRoutes = () => {
         <Route 
           path="/" 
           element={
-            <DashboardLayout>
+            <DashboardLayout title="Dashboard" subtitle="Real-time operational metrics and announcements">
               <DashboardPage />
             </DashboardLayout>
           } 
         />
-        {/* Add more routes here as you build them */}
+        <Route 
+          path="/users" 
+          element={
+            <DashboardLayout title="User and Role Management" subtitle="Manage access, Roles, and invitations">
+              <UserManagementPage />
+            </DashboardLayout>
+          } 
+        />
       </Routes>
     </BrowserRouter>
   );
