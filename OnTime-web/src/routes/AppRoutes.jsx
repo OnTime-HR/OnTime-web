@@ -5,6 +5,7 @@ import DashboardLayout from '../layouts/DashboardLayout';
 import DashboardPage from '../pages/dashboard/DashboardPage';
 import UserManagementPage from '../pages/users/UserManagementPage';
 import GeofencingPage from '../pages/dashboard/GeofencingPage';
+import ApprovalsPage from '../pages/users/ApprovalsPage';
 
 const AppRoutes = () => {
   return (
@@ -34,6 +35,14 @@ const AppRoutes = () => {
               subtitle="Manage operational zones and assign shift templates to staff."
             >
               <GeofencingPage />
+            </DashboardLayout>
+          } 
+        />
+        <Route 
+          path="/reports" 
+          element={
+            <DashboardLayout title="Approvals and Reports" subtitle="Manage Pending Request and Generate Reports">
+              <ApprovalsPage />
             </DashboardLayout>
           } 
         />
