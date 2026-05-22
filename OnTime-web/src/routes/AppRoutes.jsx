@@ -6,6 +6,7 @@ import DashboardPage from '../pages/dashboard/DashboardPage';
 import UserManagementPage from '../pages/users/UserManagementPage';
 import GeofencingPage from '../pages/dashboard/GeofencingPage';
 import ApprovalsPage from '../pages/users/ApprovalsPage';
+import NewsEventsPage from '../pages/dashboard/NewsEventsPage';
 
 const AppRoutes = () => {
   return (
@@ -43,6 +44,14 @@ const AppRoutes = () => {
           element={
             <DashboardLayout title="Approvals and Reports" subtitle="Manage Pending Request and Generate Reports">
               <ApprovalsPage />
+            </DashboardLayout>
+          } 
+        />
+        <Route 
+          path="/news" 
+          element={
+            <DashboardLayout title="News & Events" subtitle="Manage institutional notifications and company announcements">
+              <NewsEventsPage />
             </DashboardLayout>
           } 
         />
