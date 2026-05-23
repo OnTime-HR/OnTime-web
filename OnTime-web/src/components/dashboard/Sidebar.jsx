@@ -1,3 +1,4 @@
+// src/components/dashboard/Sidebar.jsx
 import React from 'react';
 import { LayoutGrid, Users, MapPin, FileCheck, MessageSquare, Settings, LogOut } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -9,7 +10,8 @@ const Sidebar = () => {
   const menuItems = [
     { icon: <LayoutGrid size={22} />, label: 'Dashboard', path: '/' },
     { icon: <Users size={22} />, label: 'User and Role Management', path: '/users' },
-    { icon: <MapPin size={22} />, label: 'Geofencing and Operations', path: '/geofencing' },
+    // --- CHANGED ONLY THIS PATH TO MATCH YOUR APPROUTES ---
+    { icon: <MapPin size={22} />, label: 'Geofencing and Operations', path: '/geofencing-and-operations' }, 
     { icon: <FileCheck size={22} />, label: 'Approvals and Reports', path: '/reports' },
     { icon: <MessageSquare size={22} />, label: 'News & Events', path: '/news' },
     { icon: <Settings size={22} />, label: 'Settings', path: '/settings' },

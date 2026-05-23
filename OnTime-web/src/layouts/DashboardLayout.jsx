@@ -10,6 +10,7 @@ const DashboardLayout = ({ children, title, subtitle }) => {
       <Sidebar />
       
       <div className="flex-1 flex flex-col ml-72">
+        {/* --- PASSED THE PROPS INTO TOPBAR TO DYNAMICALLY UPDATE PAGES --- */}
         <Topbar title={title} subtitle={subtitle} />
         
         {/* pt-24 (96px) ensures content starts below the fixed Topbar */}
