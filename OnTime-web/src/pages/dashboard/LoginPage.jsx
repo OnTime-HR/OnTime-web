@@ -1,7 +1,7 @@
 // src/pages/dashboard/LoginPage.jsx
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { loginAdminPrimary } from '../../services/authService';
+import { loginAdmin } from '../../services/authService'; // FIXED: Changed import from loginAdminPrimary
 import { ShieldAlert, Lock } from 'lucide-react';
 
 const LoginPage = () => {
@@ -16,18 +16,29 @@ const LoginPage = () => {
     setError('');
     setLoading(true);
 
-    try {
-      const response = await loginAdminPrimary(email, password);
-      
-      // Cache target routing flags across windows memory context references temporarily
-      sessionStorage.setItem("mfaUserId", response.uid);
-      sessionStorage.setItem("mfaPhoneMask", response.phoneMask);
-      sessionStorage.setItem("isMfaVerified", "false");
+    const cleanEmail = email.trim();
+    const cleanPassword = password;
 
-      // Advance directly to secondary authentication lock wall screen canvas
-      navigate('/verify-mfa');
+    try {
+      // FIXED: Invoking the updated, streamlined authentication service
+      await loginAdmin(cleanEmail, cleanPassword);
+      
+      // Clear temporary storage elements cleanly if any existed
+      sessionStorage.clear();
+
+      // Navigate directly into your secure workspace dashboard
+      navigate('/dashboard');
     } catch (err) {
-      setError(err.message || "Authentication credentials validation failed.");
+      console.error("Caught raw login error object:", err);
+      
+      // Parse Firebase auth codes to provide user-friendly interface messages
+      if (err.code === 'auth/invalid-credential' || err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password') {
+        setError("Invalid administrative credentials. Please verify your email and password.");
+      } else if (err.code === 'auth/invalid-email') {
+        setError("The email address format is invalid.");
+      } else {
+        setError(err.message || "Authentication validation failed. Please try again.");
+      }
     } finally {
       setLoading(false);
     }

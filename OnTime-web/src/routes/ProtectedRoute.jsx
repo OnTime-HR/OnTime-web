@@ -1,26 +1,57 @@
 // src/routes/ProtectedRoute.jsx
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
-import { auth } from '../services/firebase';
+import { auth, db } from '../services/firebase';
+import { doc, getDoc } from 'firebase/firestore';
 
 const ProtectedRoute = ({ children }) => {
   const location = useLocation();
-  const currentUser = auth.currentUser;
+  const [loading, setLoading] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const user = auth.currentUser;
 
-  // Retrieve temporary session status tracking variables from memory storage
-  const isMfaVerified = sessionStorage.getItem("isMfaVerified") === "true";
+  useEffect(() => {
+    const checkAdminRole = async () => {
+      // If no authenticated session exists, stop immediately
+      if (!user) {
+        setLoading(false);
+        return;
+      }
+      
+      try {
+        // FIXED: Pointing directly to your new, standalone 'admins' collection schema
+        const adminDoc = await getDoc(doc(db, "admins", user.uid));
+        
+        if (adminDoc.exists() && adminDoc.data().role === "Admin") {
+          setIsAdmin(true);
+        } else {
+          console.warn(`Unauthorized access attempt: UID ${user.uid} not verified in 'admins' collection.`);
+        }
+      } catch (err) {
+        console.error("Administrative role cross-examination failed:", err);
+      }
+      setLoading(false);
+    };
 
-  if (!currentUser) {
-    // If not logged in at all, force redirect back to primary login gate
+    checkAdminRole();
+  }, [user]);
+
+  // If completely unauthenticated, bounce back to the login page card wall
+  if (!user) {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
-  if (!isMfaVerified) {
-    // If authenticated via password but hasn't completed secondary challenge step yet
-    return <Navigate to="/verify-mfa" replace />;
+  // Show a clean, minimalist loading state while Firestore fetches the document profiles
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 text-xs font-bold text-gray-400 uppercase tracking-widest">
+        Verifying Administrative Credentials...
+      </div>
+    );
   }
 
-  return children;
+  // If role matches, render layout, otherwise force bounce them out
+  return isAdmin ? children : <Navigate to="/login" replace />;
 };
 
 export default ProtectedRoute;

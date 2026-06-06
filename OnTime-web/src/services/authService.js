@@ -1,97 +1,118 @@
 // src/services/authService.js
 import { auth, db } from './firebase';
 import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 
 /**
- * Step 1: Core Password & Location Validation Gate
+ * Validates administrative credentials against Firebase Auth,
+ * automates profile seeding into a dedicated 'admins' collection,
+ * and executes corporate network location restriction gates.
+ * * @param {string} email 
+ * @param {string} password 
+ * @returns {object} adminData
  */
-export const loginAdminPrimary = async (email, password) => {
-  // 1. Authenticate credentials via Firebase Auth
+export const loginAdmin = async (email, password) => {
+  // 1. Authenticate login credentials against Firebase Auth
   const userCredential = await signInWithEmailAndPassword(auth, email, password);
   const user = userCredential.user;
 
-  // 2. Pull the user's matching Firestore document profile parameters
-  const userDocRef = doc(db, "users", user.uid);
-  const userSnap = await getDoc(userDocRef);
+  // 2. THE SEPARATE COLLECTION GATE: Read directly from the dedicated 'admins' collection
+  const adminDocRef = doc(db, "admins", user.uid);
+  const adminSnap = await getDoc(adminDocRef);
 
-  if (!userSnap.exists()) {
-    await signOut(auth);
-    throw new Error("Unauthorized: No profile records found for this account.");
-  }
+  let adminData;
 
-  const userData = userSnap.data();
+  // 3. THE AUTOMATION STEP: If no admin document exists yet, initialize it inside 'admins'
+  if (!adminSnap.exists()) {
+    // Generate the initial corporate head profile schema properties
+    const newAdminProfile = {
+      name: email.split('@')[0], // Falls back to email prefix as a temporary name
+      email: email,
+      role: "Admin",             // Hardcoded safety assignment
+      company_code: "COM100",    // Corporate operational scope token
+      allowedIP: "ANY",          // Default configuration to prevent immediate lockout
+      createdAt: new Date().toISOString()
+    };
 
-  // 3. Strict Role-Based Check: Block everyone except explicitly marked Admins
-  if (userData.role !== "Admin") {
-    await signOut(auth);
-    throw new Error("Access Denied: Web console access restricted to Admins only.");
-  }
-
-  // 4. Location Restriction Option: Verify public network parameters
-  if (userData.allowedIP && userData.allowedIP !== "ANY" && userData.allowedIP !== "") {
     try {
-      // Fetch public client IP using a secure, lightweight endpoint lookup
+      // Automate document creation inside the 'admins' collection using the User UID as Document ID
+      await setDoc(adminDocRef, newAdminProfile);
+      adminData = newAdminProfile;
+      console.log("Automated Onboarding: Standalone 'admins' collection record created for UID:", user.uid);
+    } catch (createErr) {
+      // Force signout from Firebase Auth state to maintain system security rules boundaries
+      await signOut(auth);
+      console.error("Failed to automate profile creation inside 'admins':", createErr);
+      throw new Error("Initialization Error: Unable to provision your dedicated admin workspace profile structures.");
+    }
+  } else {
+    // If the profile already exists inside the 'admins' collection, fetch it
+    adminData = adminSnap.data();
+  }
+
+  // 4. Strict Role Validation: Ensure consistency within the dedicated collection
+  if (adminData.role !== "Admin") {
+    await signOut(auth);
+    throw new Error("Access Denied: Web console access restricted to authorized Admins only.");
+  }
+
+  // 5. Network Location Restriction Check
+  if (adminData.allowedIP && adminData.allowedIP !== "ANY" && adminData.allowedIP !== "") {
+    try {
       const ipResponse = await fetch('https://api.ipify.org?format=json');
       const ipData = await ipResponse.json();
       
-      if (ipData.ip !== userData.allowedIP) {
+      if (ipData.ip !== adminData.allowedIP) {
         await signOut(auth);
         throw new Error(`Location Blocked: Access not permitted from IP address ${ipData.ip}.`);
       }
     } catch (ipErr) {
       await signOut(auth);
-      throw new Error("Security Check Failed: Unable to verify connection network location.");
+      throw new Error("Security Check Failed: Unable to verify network location bounds.");
     }
   }
 
-  // 5. Generate a lightweight custom 6-digit MFA temporary token via Firestore
-  const generatedMfaToken = Math.floor(100000 + Math.random() * 900000).toString();
-  
-  // Set an expiration deadline timestamp (valid for exactly 5 minutes)
-  const tokenExpiry = Date.now() + (5 * 60 * 1000); 
-
-  await updateDoc(userDocRef, {
-    "webMfaToken": generatedMfaToken,
-    "webMfaExpiry": tokenExpiry
-  });
-
-  // Log to terminal for local debugging / SMS backend router delivery link
-  console.log(`[MFA SIMULATION LOG] Secure OTP sent to ${userData.mfaPhone}: ${generatedMfaToken}`);
-
-  return {
-    uid: user.uid,
-    companyCode: userData.company_code,
-    phoneMask: userData.mfaPhone ? `******${userData.mfaPhone.substring(userData.mfaPhone.length - 4)}` : "Registered Device"
-  };
+  // Return the admin profile metrics to your frontend application state
+  return adminData;
 };
 
+// Add this to the bottom of src/services/authService.js
+import { createUserWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
+
 /**
- * Step 2: Validate the 6-Digit MFA Session Token
+ * Programmatically invites a new company head.
+ * Creates their Auth container, generates their custom 'admins' collection 
+ * record, and fires the invitation email template to their inbox automatically.
+ * * @param {string} adminEmail 
+ * @param {string} companyCode 
  */
-export const verifyMfaToken = async (userId, inputtedToken) => {
-  const userDocRef = doc(db, "users", userId);
-  const userSnap = await getDoc(userDocRef);
+export const inviteNewAdmin = async (adminEmail, companyCode = "COM100") => {
+  try {
+    // 1. Generate a complex temporary secure password string under the hood
+    const temporarySecurePassword = Math.random().toString(36).slice(-10) + "A1!_temp";
 
-  if (!userSnap.exists()) throw new Error("Verification profile not found.");
-  
-  const userData = userSnap.data();
+    // 2. Provision the new account container inside Firebase Auth
+    const userCredential = await createUserWithEmailAndPassword(auth, adminEmail, temporarySecurePassword);
+    const uid = userCredential.user.uid;
 
-  // Validate presence and matches
-  if (!userData.webMfaToken || userData.webMfaToken !== inputtedToken) {
-    throw new Error("Invalid verification code. Please check and try again.");
+    // 3. Automate profile creation inside your separate 'admins' collection immediately
+    const adminDocRef = doc(db, "admins", uid);
+    await setDoc(adminDocRef, {
+      name: adminEmail.split('@')[0],
+      email: adminEmail,
+      role: "Admin",
+      company_code: companyCode.toUpperCase(),
+      allowedIP: "ANY",
+      createdAt: new Date().toISOString()
+    });
+
+    // 4. Automatically trigger the invitation email link using Firebase's native messaging server
+    await sendPasswordResetEmail(auth, adminEmail);
+
+    console.log(`Automated Invite: Link successfully dispatched to ${adminEmail}`);
+    return { success: true, message: `Invitation link sent to ${adminEmail}` };
+  } catch (error) {
+    console.error("Automated Invitation process failed:", error);
+    throw new Error(error.message || "Failed to successfully execute invitation routine.");
   }
-
-  // Verify expiration window timing limits
-  if (Date.now() > userData.webMfaExpiry) {
-    throw new Error("Verification code has expired. Please log in again to request a new code.");
-  }
-
-  // Clear token fields inside document upon successful validation to prevent reuse attacks
-  await updateDoc(userDocRef, {
-    "webMfaToken": null,
-    "webMfaExpiry": null
-  });
-
-  return userData;
 };
