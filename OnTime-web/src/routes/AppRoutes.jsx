@@ -8,13 +8,19 @@ import GeofencingPage from '../pages/dashboard/GeofencingPage';
 import ApprovalsPage from '../pages/users/ApprovalsPage';
 import NewsEventsPage from '../pages/dashboard/NewsEventsPage';
 import SettingsPage from '../pages/dashboard/SettingsPage';
+import LoginPage from '../pages/dashboard/LoginPage';
+import MfaVerifyPage from '../pages/dashboard/MfaVerifyPage';
+import ProtectedRoute from './ProtectedRoute';
 
 const AppRoutes = () => {
   return (
     <BrowserRouter>
       <Routes>
+        <Route path="/" element={<LoginPage />} />
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/verify-mfa" element={<MfaVerifyPage />} />
         <Route 
-          path="/" 
+          path="/dashboard" 
           element={
             <DashboardLayout title="Dashboard" subtitle="Real-time operational metrics and announcements">
               <DashboardPage />
