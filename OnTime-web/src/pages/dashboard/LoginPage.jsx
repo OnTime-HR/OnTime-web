@@ -2,11 +2,12 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { loginAdmin } from '../../services/authService'; // FIXED: Changed import from loginAdminPrimary
-import { ShieldAlert, Lock } from 'lucide-react';
+import { ShieldAlert, Lock, Eye, EyeOff } from 'lucide-react';
 
 const LoginPage = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
@@ -22,7 +23,7 @@ const LoginPage = () => {
     try {
       // FIXED: Invoking the updated, streamlined authentication service
       await loginAdmin(cleanEmail, cleanPassword);
-      
+
       // Clear temporary storage elements cleanly if any existed
       sessionStorage.clear();
 
@@ -30,7 +31,7 @@ const LoginPage = () => {
       navigate('/dashboard');
     } catch (err) {
       console.error("Caught raw login error object:", err);
-      
+
       // Parse Firebase auth codes to provide user-friendly interface messages
       if (err.code === 'auth/invalid-credential' || err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password') {
         setError("Invalid administrative credentials. Please verify your email and password.");
@@ -87,13 +88,22 @@ const LoginPage = () => {
               <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">
                 Portal Security Password
               </label>
-              <input
-                type="password"
-                required
-                className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 text-sm outline-none focus:border-[#F9A825] transition-all"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-              />
+              <div className="relative">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  required
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 pr-10 text-sm outline-none focus:border-[#F9A825] transition-all"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 focus:outline-none cursor-pointer flex items-center"
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
             </div>
 
             <button
