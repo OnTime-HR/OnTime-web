@@ -2,55 +2,62 @@
 import React, { useEffect, useState } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { auth, db } from '../services/firebase';
+import { onAuthStateChanged } from 'firebase/auth'; // Added for safe session tracking
 import { doc, getDoc } from 'firebase/firestore';
 
 const ProtectedRoute = ({ children }) => {
   const location = useLocation();
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
-  const user = auth.currentUser;
+  const [currentUser, setCurrentUser] = useState(null); // Track user safely in state
 
   useEffect(() => {
-    const checkAdminRole = async () => {
-      // If no authenticated session exists, stop immediately
-      if (!user) {
+    // 1. Setup an active listener to catch the real Firebase Auth engine boot timing
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (!firebaseUser) {
+        setCurrentUser(null);
+        setIsAdmin(false);
         setLoading(false);
         return;
       }
-      
+
+      setCurrentUser(firebaseUser);
+
       try {
-        // FIXED: Pointing directly to your new, standalone 'admins' collection schema
-        const adminDoc = await getDoc(doc(db, "admins", user.uid));
+        // 2. Pointing directly to your standalone 'admins' collection schema
+        const adminDoc = await getDoc(doc(db, "admins", firebaseUser.uid));
         
         if (adminDoc.exists() && adminDoc.data().role === "Admin") {
           setIsAdmin(true);
         } else {
-          console.warn(`Unauthorized access attempt: UID ${user.uid} not verified in 'admins' collection.`);
+          console.warn(`Unauthorized access attempt: UID ${firebaseUser.uid} not verified in 'admins' collection.`);
         }
       } catch (err) {
         console.error("Administrative role cross-examination failed:", err);
       }
+      
       setLoading(false);
-    };
+    });
 
-    checkAdminRole();
-  }, [user]);
+    // Clean up the memory subscription listener on component unmount
+    return () => unsubscribe();
+  }, []);
 
-  // If completely unauthenticated, bounce back to the login page card wall
-  if (!user) {
-    return <Navigate to="/login" state={{ from: location }} replace />;
-  }
-
-  // Show a clean, minimalist loading state while Firestore fetches the document profiles
+  // 3. Show a clean loading state while the authentication state initializes
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 text-xs font-bold text-gray-400 uppercase tracking-widest">
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 text-xs font-bold text-gray-400 uppercase tracking-widest animate-pulse">
         Verifying Administrative Credentials...
       </div>
     );
   }
 
-  // If role matches, render layout, otherwise force bounce them out
+  // 4. If completely unauthenticated, bounce back to the login page safely
+  if (!currentUser) {
+    return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  // 5. If role matches, render layouts cleanly, otherwise lock them out completely
   return isAdmin ? children : <Navigate to="/login" replace />;
 };
 

@@ -1,3 +1,4 @@
+// src/pages/dashboard/DashboardPage.jsx
 import React, { useState, useEffect } from 'react';
 import AttendanceChart from '../../components/dashboard/AttendanceChart';
 import StatCard from '../../components/dashboard/StatCard';
@@ -5,13 +6,19 @@ import NewsCard from '../../components/dashboard/NewsCard';
 import { Users, FileText, AlertTriangle } from 'lucide-react';
 import { db } from '../../services/firebase';
 import { collection, onSnapshot, query, where, orderBy, limit } from 'firebase/firestore';
-import NewPostModal from '../../components/dashboard/NewPostModal'; // Import the modal
+import NewPostModal from '../../components/dashboard/NewPostModal';
 
 const DashboardPage = () => {
   const [employeeCount, setEmployeeCount] = useState(0);
   const [pendingLeaves, setPendingLeaves] = useState(0);
   const [news, setNews] = useState([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  
+  // LIVE ATTENDANCE STATES & CUSTOM FILTER DROPDOWN TOGGLES
+  const [rawAttendanceLogs, setRawAttendanceLogs] = useState([]);
+  const [weeklyAttendanceMetrics, setWeeklyAttendanceMetrics] = useState([]);
+  const [timeFilter, setTimeFilter] = useState('This Week');
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
   useEffect(() => {
     // 1. Total Employees (Count from users collection where role is Employee)
@@ -19,15 +26,8 @@ const DashboardPage = () => {
     const unsubUsers = onSnapshot(qUsers, (snap) => setEmployeeCount(snap.size));
 
     // 2. Pending Leaves (Count from leave_requests where status is pending)
-    const qLeaves = query(
-      collection(db, "leave_requests"),
-      where("status", "==", "Pending") // Fixed casing to match image_a2e692.jpg
-    );
-
-    const unsubLeaves = onSnapshot(qLeaves, (snap) => {
-      console.log("Pending leaves found:", snap.size); // Check your console to verify
-      setPendingLeaves(snap.size);
-    });
+    const qLeaves = query(collection(db, "leave_requests"), where("status", "==", "Pending"));
+    const unsubLeaves = onSnapshot(qLeaves, (snap) => setPendingLeaves(snap.size));
 
     // 3. Company News (Latest 3 items from company_news)
     const qNews = query(collection(db, "company_news"), orderBy("createdAt", "desc"), limit(3));
@@ -37,31 +37,103 @@ const DashboardPage = () => {
         title: doc.data().title,
         description: doc.data().description,
         tag: doc.data().tag,
-        // Using a placeholder image if imageUrl isn't in your Firestore document yet
         image: doc.data().imageUrl || "https://images.pexels.com/photos/3183150/pexels-photo-3183150.jpeg",
         time: doc.data().createdAt?.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       })));
+    });
+
+    // 4. Real-time Attendance Collection Listener Stream
+    const attendanceRef = collection(db, "attendance");
+    const unsubAttendance = onSnapshot(attendanceRef, (snapshot) => {
+      const logs = snapshot.docs.map(docSnap => {
+        const data = docSnap.data();
+        let parsedDate = new Date();
+
+        if (data.date) {
+          parsedDate = typeof data.date.toDate === 'function' ? data.date.toDate() : new Date(data.date);
+        } else if (data.createdAt) {
+          parsedDate = typeof data.createdAt.toDate === 'function' ? data.createdAt.toDate() : new Date(data.createdAt);
+        }
+
+        return { id: docSnap.id, ...data, dateObject: parsedDate };
+      });
+      
+      setRawAttendanceLogs(logs);
     });
 
     return () => {
       unsubUsers();
       unsubLeaves();
       unsubNews();
+      unsubAttendance();
     };
   }, []);
 
+  // 5. CALCULATE GRAPH SECTIONS EVERY TIME THE TIME FILTER SELECTION MUTATES
+  useEffect(() => {
+    const now = new Date();
+    
+    if (timeFilter === 'This Week') {
+      const daysMap = { 'Mon': 0, 'Tue': 0, 'Wed': 0, 'Thu': 0, 'Fri': 0, 'Sat': 0, 'Sun': 0 };
+      
+      const currentDayIndex = now.getDay();
+      const distanceToMonday = currentDayIndex === 0 ? -6 : 1 - currentDayIndex;
+      const startOfWeek = new Date(now);
+      startOfWeek.setDate(now.getDate() + distanceToMonday);
+      startOfWeek.setHours(0,0,0,0);
+
+      rawAttendanceLogs.forEach(log => {
+        if (log.dateObject >= startOfWeek && log.dateObject <= now) {
+          const weekdayStr = log.dateObject.toLocaleDateString('en-US', { weekday: 'short' });
+          if (daysMap[weekdayStr] !== undefined) daysMap[weekdayStr]++;
+        }
+      });
+
+      setWeeklyAttendanceMetrics(Object.keys(daysMap).map(k => ({ name: k, "Active Staff": daysMap[k] })));
+    } 
+    
+    else if (timeFilter === 'This Month') {
+      const weeksMap = { 'Week 1': 0, 'Week 2': 0, 'Week 3': 0, 'Week 4+': 0 };
+
+      rawAttendanceLogs.forEach(log => {
+        if (log.dateObject.getMonth() === now.getMonth() && log.dateObject.getFullYear() === now.getFullYear()) {
+          const dayOfMonth = log.dateObject.getDate();
+          if (dayOfMonth <= 7) weeksMap['Week 1']++;
+          else if (dayOfMonth <= 14) weeksMap['Week 2']++;
+          else if (dayOfMonth <= 21) weeksMap['Week 3']++;
+          else weeksMap['Week 4+']++;
+        }
+      });
+
+      setWeeklyAttendanceMetrics(Object.keys(weeksMap).map(k => ({ name: k, "Active Staff": weeksMap[k] })));
+    } 
+    
+    else if (timeFilter === 'This Year') {
+      const quartersMap = { 'Q1 (Jan-Mar)': 0, 'Q2 (Apr-Jun)': 0, 'Q3 (Jul-Sep)': 0, 'Q4 (Oct-Dec)': 0 };
+
+      rawAttendanceLogs.forEach(log => {
+        if (log.dateObject.getFullYear() === now.getFullYear()) {
+          const monthIdx = log.dateObject.getMonth();
+          if (monthIdx <= 2) quartersMap['Q1 (Jan-Mar)']++;
+          else if (monthIdx <= 5) quartersMap['Q2 (Apr-Jun)']++;
+          else if (monthIdx <= 8) quartersMap['Q3 (Jul-Sep)']++;
+          else quartersMap['Q4 (Oct-Dec)']++;
+        }
+      });
+
+      setWeeklyAttendanceMetrics(Object.keys(quartersMap).map(k => ({ name: k, "Active Staff": quartersMap[k] })));
+    }
+  }, [timeFilter, rawAttendanceLogs]);
+
   return (
     <div className="p-10">
-      <NewPostModal
-        isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-      />
+      <NewPostModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} />
+      
       <div className="grid grid-cols-12 gap-8">
-
         {/* LEFT COLUMN: Stats and Analytics */}
         <div className="col-span-9 space-y-8">
-
-          {/* Stat Cards Row - Now using live values from Firebase */}
+          
+          {/* Stat Cards Row */}
           <div className="flex gap-8">
             <StatCard
               label="Total Employees"
@@ -81,7 +153,7 @@ const DashboardPage = () => {
             />
             <StatCard
               label="Active Alerts"
-              value="0" // You can create an 'alerts' collection later to map this
+              value="0"
               subtext="System health check normal"
               icon={<AlertTriangle className="text-red-600" size={20} />}
               iconBg="bg-red-50"
@@ -89,12 +161,18 @@ const DashboardPage = () => {
             />
           </div>
 
-          <AttendanceChart />
+          {/* CLEAN CONSOLE RENDER CALL: Pass hooks down directly, no outer card wrapper elements here! */}
+          <AttendanceChart 
+            data={weeklyAttendanceMetrics} 
+            currentFilter={timeFilter}
+            isDropdownOpen={isDropdownOpen}
+            setIsDropdownOpen={setIsDropdownOpen}
+            setTimeFilter={setTimeFilter}
+          />
         </div>
 
         {/* RIGHT COLUMN: News & Announcements Sidebar */}
         <div className="col-span-3 bg-white p-6 rounded-2xl border border-gray-100 shadow-sm flex flex-col h-fit">
-
           <div className="flex justify-between items-center mb-6">
             <h3 className="font-bold text-[#F9A825] text-base leading-tight">
               News &<br />Announcements
@@ -112,12 +190,11 @@ const DashboardPage = () => {
             </button>
           </div>
 
-          {/* News List Content - Mapping from 'news' state variable */}
           <div className="flex-1 space-y-4">
             {news.map((item, index) => (
               <NewsCard
                 key={item.id}
-                isFeatured={index === 0} // First item is the featured banner
+                isFeatured={index === 0}
                 title={item.title}
                 description={item.description}
                 time={item.time}
@@ -132,17 +209,11 @@ const DashboardPage = () => {
 
           <button className="mt-6 pt-4 border-t border-gray-50 w-full flex items-center justify-center gap-2 text-gray-600 font-bold text-[12px] hover:text-[#F9A825] transition-colors group">
             View Archived News
-            <svg
-              className="w-4 h-4 transition-transform group-hover:translate-x-1"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
+            <svg className="w-4 h-4 transition-transform group-hover:translate-x-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M14 5l7 7m0 0l-7 7m7-7H3" />
             </svg>
           </button>
         </div>
-
       </div>
     </div>
   );
