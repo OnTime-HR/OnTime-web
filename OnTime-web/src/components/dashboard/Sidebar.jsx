@@ -10,7 +10,7 @@ const Sidebar = () => {
   const navigate = useNavigate();
 
   const menuItems = [
-    { icon: <LayoutGrid size={22} />, label: 'Dashboard', path: '/' },
+    { icon: <LayoutGrid size={22} />, label: 'Dashboard', path: '/dashboard' },
     { icon: <Users size={22} />, label: 'User and Role Management', path: '/users' },
     { icon: <MapPin size={22} />, label: 'Geofencing and Operations', path: '/geofencing-and-operations' }, 
     { icon: <FileCheck size={22} />, label: 'Approvals and Reports', path: '/reports' },
