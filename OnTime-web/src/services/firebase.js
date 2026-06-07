@@ -14,12 +14,12 @@ import {
 
 // Firebase configuration
 const firebaseConfig = {
-  apiKey: "AIzaSyBq2Q2_1ZCmT-xwJvuSq1w3ugGAfALv_8A",
-  authDomain: "ontime-df19b.firebaseapp.com",
-  projectId: "ontime-df19b",
-  storageBucket: "ontime-df19b.firebasestorage.app",
-  messagingSenderId: "168959223360",
-  appId: "1:168959223360:web:043df2cb2416402a7621a5"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
 
 // Initialize Firebase
