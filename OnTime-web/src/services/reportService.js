@@ -1,6 +1,5 @@
 // src/services/reportService.js
 import { db } from './firebase';
-// FIXED: Added missing 'doc' parameter to the Firestore import line below
 import { collection, getDocs, addDoc, doc, deleteDoc } from 'firebase/firestore';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -26,7 +25,15 @@ const fetchFirestoreData = async (domain) => {
 /**
  * Compiles real database logs, triggers downloads, and logs history to the archive.
  */
-export const generateAndArchiveReport = async (reportType, format) => {
+// src/services/reportService.js
+
+/**
+ * Compiles real database logs, triggers downloads, and logs history to the archive conditionally.
+ * @param {string} reportType - 'Employee' | 'Attendance' | 'Leave' | 'Payroll'
+ * @param {string} format - 'pdf' | 'excel'
+ * @param {boolean} shouldArchive - If true, provisions a new database record document entry
+ */
+export const generateAndArchiveReport = async (reportType, format, shouldArchive = true) => {
   // 1. Fetch live metrics from the respective Firestore collections
   const rawData = await fetchFirestoreData(reportType);
 
@@ -71,11 +78,10 @@ export const generateAndArchiveReport = async (reportType, format) => {
     XLSX.writeFile(workbook, `${fileName}.xlsx`);
   } 
   
-  // 4. EXECUTE FIXED PDF EXPORT WORKFLOW 
+  // 4. EXECUTE PDF EXPORT WORKFLOW 
   else if (format === 'pdf') {
     const docInstance = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
     
-    // Top Brand Accent Strip (#F9A825)
     docInstance.setFillColor(249, 168, 37);
     docInstance.rect(0, 0, 210, 8, 'F');
 
@@ -106,19 +112,35 @@ export const generateAndArchiveReport = async (reportType, format) => {
     docInstance.save(`${fileName}.pdf`);
   }
 
+  // FIXED STEP GATE: Only write a record document if shouldArchive flag evaluates to true
+  if (shouldArchive) {
+    try {
+      await addDoc(collection(db, "reports_archive"), {
+        reportName: `${reportType} System Report`,
+        type: reportType,
+        format: format.toUpperCase(),
+        downloadedAt: new Date(),
+        fileUrl: `${fileName}.${format}`
+      });
+      console.log("Archive System: Log document successfully saved to Firestore.");
+    } catch (dbError) {
+      console.error("Archive System: Failed to write history record log:", dbError);
+    }
+  }
+
   return fileName;
 };
 
 /**
- * FIXED: Re-triggers a clean, live data download from the history section
+ * FIXED: Re-triggers file downloads from the history card table list without generating duplicate log rows
  */
 export const downloadArchivedFile = async (logRecord) => {
   try {
     const reportType = logRecord.type;
     const format = logRecord.format.toLowerCase();
     
-    // Calls our primary dynamic function to pull up-to-date data from Firestore
-    await generateAndArchiveReport(reportType, format);
+    // FIXED: Passed third parameter as false to tell the engine to skip the addDoc database step
+    await generateAndArchiveReport(reportType, format, false);
   } catch (err) {
     console.error("Failed to re-trigger archive download:", err);
     alert("Re-download Error: " + err.message);
@@ -126,10 +148,9 @@ export const downloadArchivedFile = async (logRecord) => {
 };
 
 /**
- * FIXED: Permanently deletes an archive entry log from the Cloud Firestore collection
+ * Permanently deletes an archive entry log from the Cloud Firestore collection
  */
 export const deleteArchivedRecord = async (logId) => {
-  // Now works perfectly because 'doc' is imported at the top of the file
   const recordRef = doc(db, "reports_archive", logId);
   await deleteDoc(recordRef);
 };

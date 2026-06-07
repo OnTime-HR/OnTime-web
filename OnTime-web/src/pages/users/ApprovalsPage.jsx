@@ -1,11 +1,10 @@
 // src/pages/users/ApprovalsPage.jsx
 import React, { useState, useEffect } from 'react';
-// Added AlertTriangle to handle the custom warning icon layout display
 import { Hourglass, CheckCircle, DollarSign, Download, FileText, FileSpreadsheet, History, Search, Trash2, AlertTriangle } from 'lucide-react';
-import { streamPendingRequests, updateRequestStatus } from '../../services/approvalService';
+import { updateRequestStatus } from '../../services/approvalService';
 import { generateAndArchiveReport, downloadArchivedFile, deleteArchivedRecord } from '../../services/reportService';
 import { db } from '../../services/firebase';
-import { collection, query, orderBy, onSnapshot } from 'firebase/firestore';
+import { collection, query, onSnapshot } from 'firebase/firestore'; // Removed orderBy to prevent index crash
 
 const ApprovalsPage = () => {
   const [activeTab, setActiveTab] = useState('All Requests');
@@ -14,38 +13,85 @@ const ApprovalsPage = () => {
   const [loadingId, setLoadingId] = useState(null);
   const [compiling, setCompiling] = useState(false);
   
-  // Interactive operational state parameters
   const [selectedReport, setSelectedReport] = useState('Leave');
   const [exportFormat, setExportFormat] = useState('pdf');
   const [searchQuery, setSearchQuery] = useState('');
-
-  // CUSTOM MODAL STATES: Tracks if the custom alert is open, and which log ID it points to
   const [deleteModal, setDeleteModal] = useState({ isOpen: false, logId: null });
 
-  // 1. Hook up the live Firestore system streams
+  // LIVE METRIC STATES
+  const [metrics, setMetrics] = useState({
+    pendingCount: 0,
+    approvalsThisMonth: 0,
+    totalClaimsValue: 0
+  });
+
+  // 1. Live stream calculation engine setup
   useEffect(() => {
-    const unsubscribeRequests = streamPendingRequests((firebaseData) => {
-      const formatted = firebaseData.map(item => ({
-        id: item.id,
-        employeeId: item.userId || '', 
-        employeeName: item.userName || 'Unknown Staff',
-        role: item.userRole || 'Employee',
-        type: item.leaveType || 'Leave',
-        dateRequested: item.appliedAt?.toDate().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) || 'Recent',
-        duration: item.totalDays || 1,
-        status: item.status || 'Pending'
-      }));
+    const requestsRef = collection(db, "leave_requests");
+    
+    const unsubscribeRequests = onSnapshot(requestsRef, (snapshot) => {
+      const currentMonth = new Date().getMonth();
+      const currentYear = new Date().getFullYear();
+      
+      let pending = 0;
+      let approvedThisMonth = 0;
+      let totalValue = 0;
+
+      const formatted = snapshot.docs.map(docSnap => {
+        const item = docSnap.data();
+        const appliedDate = item.appliedAt?.toDate() || new Date();
+        
+        if (item.status === 'Pending') {
+          pending++;
+        }
+
+        if (item.status === 'Approved' && appliedDate.getMonth() === currentMonth && appliedDate.getFullYear() === currentYear) {
+          approvedThisMonth++;
+        }
+
+        if (item.status === 'Approved') {
+          const valueOfClaim = item.claimAmount || item.amount || (item.totalDays * 150);
+          totalValue += Number(valueOfClaim || 0);
+        }
+
+        return {
+          id: docSnap.id,
+          employeeId: item.userId || '', 
+          employeeName: item.userName || 'Unknown Staff',
+          role: item.userRole || 'Employee',
+          type: item.leaveType || 'Leave',
+          dateRequested: appliedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+          duration: item.totalDays || 1,
+          status: item.status || 'Pending'
+        };
+      });
+
+      setMetrics({
+        pendingCount: pending,
+        approvalsThisMonth: approvedThisMonth,
+        totalClaimsValue: totalValue
+      });
+
       setAllRequests(formatted);
     });
 
-    const archiveQuery = query(collection(db, "reports_archive"), orderBy("downloadedAt", "desc"));
+    // FIXED: Swapped out the old index-dependent query block for a clean, error-free raw collection stream
+    const archiveQuery = query(collection(db, "reports_archive"));
     const unsubscribeArchive = onSnapshot(archiveQuery, (snapshot) => {
       const logs = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data(),
         dateFormatted: doc.data().downloadedAt?.toDate().toLocaleString() || 'Just Now'
       }));
-      setArchiveLogs(logs);
+
+      // In-Memory Sorting Layer: Sorts descending (newest on top) without needing Firebase Index rules
+      const sortedLogs = logs.sort((a, b) => {
+        const dateA = a.downloadedAt?.toDate() || new Date(0);
+        const dateB = b.downloadedAt?.toDate() || new Date(0);
+        return dateB - dateA;
+      });
+
+      setArchiveLogs(sortedLogs);
     });
 
     return () => {
@@ -53,6 +99,21 @@ const ApprovalsPage = () => {
       unsubscribeArchive();
     };
   }, []);
+
+  const pendingRequestsTableRows = allRequests.filter(req => req.status === 'Pending');
+
+  const filteredRequests = pendingRequestsTableRows.filter(req => {
+    if (activeTab === 'All Requests') return true;
+    const requestType = req.type ? req.type.toLowerCase().trim() : '';
+    const currentTab = activeTab.toLowerCase().trim();
+    return requestType === currentTab || requestType.includes(currentTab) || currentTab.includes(requestType);
+  });
+
+  const filteredArchiveLogs = archiveLogs.filter(log => 
+    log.fileUrl.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    log.reportName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    log.format.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
   const handleCompileReport = async () => {
     setCompiling(true);
@@ -65,21 +126,14 @@ const ApprovalsPage = () => {
     }
   };
 
-  // Triggers the custom modal state instead of using native window prompts
-  const openConfirmDelete = (logId) => {
-    setDeleteModal({ isOpen: true, logId: logId });
-  };
-
-  const closeConfirmDelete = () => {
-    setDeleteModal({ isOpen: false, logId: null });
-  };
+  const openConfirmDelete = (logId) => setDeleteModal({ isOpen: true, logId: logId });
+  const closeConfirmDelete = () => setDeleteModal({ isOpen: false, logId: null });
 
   const handleArchiveDeleteExecute = async () => {
     if (!deleteModal.logId) return;
-    
     try {
       await deleteArchivedRecord(deleteModal.logId);
-      closeConfirmDelete(); // Closes the modal smoothly on success
+      closeConfirmDelete();
     } catch (err) {
       alert("Deletion Failure: " + err.message);
     }
@@ -97,17 +151,6 @@ const ApprovalsPage = () => {
     }
   };
 
-  const filteredRequests = allRequests.filter(req => {
-    if (activeTab === 'All Requests') return true;
-    return req.type.toLowerCase() === activeTab.toLowerCase();
-  });
-
-  const filteredArchiveLogs = archiveLogs.filter(log => 
-    log.fileUrl.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    log.reportName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    log.format.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
   return (
     <div className="p-10 relative">
       {/* METRICS ROW */}
@@ -115,7 +158,7 @@ const ApprovalsPage = () => {
         <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm flex items-center justify-between">
           <div>
             <p className="text-gray-500 text-xs font-semibold uppercase tracking-wider mb-1">Pending Requests</p>
-            <h3 className="text-3xl font-bold text-gray-900">{allRequests.length}</h3>
+            <h3 className="text-3xl font-bold text-gray-900">{metrics.pendingCount}</h3>
           </div>
           <div className="p-3 bg-[#FFF4E5] rounded-xl text-[#F9A825]">
             <Hourglass size={24} />
@@ -125,7 +168,7 @@ const ApprovalsPage = () => {
         <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm flex items-center justify-between">
           <div>
             <p className="text-gray-500 text-xs font-semibold uppercase tracking-wider mb-1">Approvals This Month</p>
-            <h3 className="text-3xl font-bold text-gray-900">48</h3>
+            <h3 className="text-3xl font-bold text-gray-900">{metrics.approvalsThisMonth}</h3>
           </div>
           <div className="p-3 bg-green-50 rounded-xl text-green-600">
             <CheckCircle size={24} />
@@ -135,7 +178,9 @@ const ApprovalsPage = () => {
         <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm flex items-center justify-between">
           <div>
             <p className="text-gray-500 text-xs font-semibold uppercase tracking-wider mb-1">Total Claims Value</p>
-            <h3 className="text-3xl font-bold text-gray-900">$4,250</h3>
+            <h3 className="text-3xl font-bold text-gray-900">
+              ${metrics.totalClaimsValue.toLocaleString('en-US', { minimumFractionDigits: 0 })}
+            </h3>
           </div>
           <div className="p-3 bg-blue-50 rounded-xl text-blue-600">
             <DollarSign size={24} />
@@ -221,6 +266,9 @@ const ApprovalsPage = () => {
               ))}
             </tbody>
           </table>
+          {filteredRequests.length === 0 && (
+            <p className="text-xs text-gray-400 text-center py-8">No pending requests found in this category.</p>
+          )}
         </div>
       </div>
 
@@ -284,13 +332,12 @@ const ApprovalsPage = () => {
           </button>
         </div>
 
-        {/* REPOSTS ARCHIVE CONTAINER BOX */}
+        {/* REPORTS ARCHIVE VIEW CONTAINER */}
         <div className="col-span-8 bg-white p-6 rounded-2xl border border-gray-100 shadow-sm flex flex-col h-[380px]">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
             <div className="flex items-center gap-2 text-base font-bold text-gray-800">
               <History size={18} className="text-gray-400" /> Generated Reports Archive
             </div>
-            
             <div className="relative flex items-center w-full sm:w-64">
               <Search className="absolute left-3 text-gray-400" size={14} />
               <input
@@ -325,7 +372,7 @@ const ApprovalsPage = () => {
                     <Download size={15} />
                   </button>
                   <button
-                    onClick={() => openConfirmDelete(log.id)} // CHANGED: Calls our custom modal gate state
+                    onClick={() => openConfirmDelete(log.id)}
                     className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
                     title="Delete Log"
                   >
@@ -334,46 +381,34 @@ const ApprovalsPage = () => {
                 </div>
               </div>
             ))}
+            {filteredArchiveLogs.length === 0 && (
+              <div className="h-full flex flex-col items-center justify-center py-16 text-center">
+                <p className="text-xs text-gray-400 font-medium">No matching generated archive files found.</p>
+              </div>
+            )}
           </div>
         </div>
       </div>
 
-      {/* ========================================================= */}
-      {/* BRAND ALIGNED PREMIUM CONFIRMATION MODAL CARD POPUP */}
-      {/* ========================================================= */}
+      {/* DELETION CONFIRMATION MODAL */}
       {deleteModal.isOpen && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 transition-opacity">
           <div className="bg-white rounded-2xl border border-gray-100 shadow-xl max-w-sm w-full p-6 text-center animate-in fade-in zoom-in-95 duration-200">
-            
-            {/* Minimalist Signature Gold Accent Icon Circle */}
             <div className="w-12 h-12 rounded-full bg-amber-50 flex items-center justify-center text-[#F9A825] mx-auto mb-4">
               <AlertTriangle size={24} />
             </div>
-
-            {/* Warning Message Typography Layout */}
             <h4 className="text-base font-bold text-gray-900 mb-1">Confirm Permanent Deletion</h4>
             <p className="text-xs text-gray-400 leading-relaxed px-2 mb-6">
               Are you sure you want to permanently delete this report log? This action will remove the record data from your workspace archive tracking dashboard layout.
             </p>
-
-            {/* Grid Action Controls Buttons */}
             <div className="grid grid-cols-2 gap-3">
-              <button
-                type="button"
-                onClick={closeConfirmDelete}
-                className="w-full bg-gray-50 hover:bg-gray-100 border border-gray-200 text-gray-500 text-xs font-bold py-3 rounded-xl transition-colors"
-              >
-                Cancel, Keep Record
+              <button type="button" onClick={closeConfirmDelete} className="w-full bg-gray-50 hover:bg-gray-100 border border-gray-200 text-gray-500 text-xs font-bold py-3 rounded-xl transition-colors">
+                Cancel
               </button>
-              <button
-                type="button"
-                onClick={handleArchiveDeleteExecute}
-                className="w-full bg-red-500 hover:bg-red-600 text-white text-xs font-bold py-3 rounded-xl shadow-sm transition-all"
-              >
-                Yes, Delete Log
+              <button type="button" onClick={handleArchiveDeleteExecute} className="w-full bg-red-500 hover:bg-red-600 text-white text-xs font-bold py-3 rounded-xl shadow-sm transition-all">
+                Delete Log
               </button>
             </div>
-
           </div>
         </div>
       )}
