@@ -2,20 +2,38 @@
 import React from 'react';
 import { LayoutGrid, Users, MapPin, FileCheck, MessageSquare, Settings, LogOut } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { auth } from '../../services/firebase';
+import { signOut } from 'firebase/auth';
 
 const Sidebar = () => {
   const location = useLocation();
   const navigate = useNavigate();
 
   const menuItems = [
-    { icon: <LayoutGrid size={22} />, label: 'Dashboard', path: '/' },
+    { icon: <LayoutGrid size={22} />, label: 'Dashboard', path: '/dashboard' },
     { icon: <Users size={22} />, label: 'User and Role Management', path: '/users' },
-    // --- CHANGED ONLY THIS PATH TO MATCH YOUR APPROUTES ---
     { icon: <MapPin size={22} />, label: 'Geofencing and Operations', path: '/geofencing-and-operations' }, 
     { icon: <FileCheck size={22} />, label: 'Approvals and Reports', path: '/reports' },
     { icon: <MessageSquare size={22} />, label: 'News & Events', path: '/news' },
     { icon: <Settings size={22} />, label: 'Settings', path: '/settings' },
   ];
+
+  const handleAdminLogout = async () => {
+    try {
+      // 1. Terminate the active global session via Firebase Auth
+      await signOut(auth);
+
+      // 2. Erase the strict session tokens and multi-factor validation flags
+      sessionStorage.clear(); 
+      localStorage.clear(); 
+
+      // 3. Bounce the user completely out of the protected router tree space back onto the login screen
+      navigate('/login', { replace: true });
+    } catch (error) {
+      console.error("An error occurred during session termination: ", error);
+      alert("Failed to sign out cleanly: " + error.message);
+    }
+  };
 
   return (
     <div className="w-72 h-screen bg-[#F0F2F5] border-r border-gray-200 flex flex-col p-5 fixed left-0 top-0">
@@ -53,9 +71,12 @@ const Sidebar = () => {
         })}
       </nav>
 
-      {/* Log Out */}
-      <div className="flex items-center gap-4 px-4 py-6 text-red-500 cursor-pointer border-t border-gray-300 hover:bg-red-50 transition-colors mt-auto">
-        <LogOut size={22} />
+      {/* Log Out Button linked to Firebase sign out */}
+      <div 
+        onClick={handleAdminLogout}
+        className="flex items-center gap-4 px-4 py-6 text-red-500 cursor-pointer border-t border-gray-300 hover:bg-red-50 transition-colors mt-auto rounded-xl group"
+      >
+        <LogOut size={22} className="transition-transform group-hover:-translate-x-0.5" />
         <span className="text-[14px] font-bold">Log Out</span>
       </div>
     </div>

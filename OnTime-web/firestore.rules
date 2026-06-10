@@ -1,0 +1,48 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 1. Company News (Public read)
+    match /company_news/{newsId} {
+      allow read: if true; 
+      allow write: if true; 
+    }
+
+    // 2. Users and their subcollections (like attendance & notifications)
+    match /users/{userId}/{document=**} {
+      allow read, write: if true;
+    }
+
+    // --- ADDED RULE FOR COLLECTION GROUP QUERIES ---
+    // This explicitly grants permission for your web dashboard's collectionGroup("attendance") query
+    match /{path=**}/attendance/{docId} {
+      allow read, write: if true;
+    }
+
+    // 3. Leave Requests
+    match /leave_requests/{requestId} {
+      allow read, write: if true; 
+    }
+    
+    // 4. Pre-Authorized Users (Needs to be readable during login)
+    match /pre_authorized_users/{phone} {
+      allow read: if true; 
+      allow write: if request.auth != null;
+    }
+    
+    // 5. Schedules/Shifts
+    match /schedules/{document=**} {
+      allow read, write: if true;
+    }
+
+    // --- Offices/Geofencing ---
+    match /offices/{officeId} {
+      allow read, write: if true;
+    }
+
+    // Standard fallback for anything else
+    match /{document=**} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}

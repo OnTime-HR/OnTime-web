@@ -18,32 +18,40 @@ const StatCard = ({ title, value, subtitle, icon, iconColor }) => {
   );
 };
 
-const UserStatCards = () => {
-  const stats = [
+const UserStatCards = ({ stats, loading }) => {
+  const totalVal = loading ? '...' : (stats?.total || 0).toLocaleString();
+  const activeVal = loading ? '...' : (stats?.active || 0).toLocaleString();
+  const pendingVal = loading ? '...' : (stats?.pending || 0).toLocaleString();
+  const adminsVal = loading ? '...' : (stats?.admins || 0).toLocaleString();
+  
+  const engagement = stats?.total > 0 ? Math.round((stats.active / stats.total) * 100) : 0;
+  const activeSubtitle = loading ? 'Calculating...' : `${engagement}% engagement rate`;
+
+  const statItems = [
     {
       title: 'Total Employees',
-      value: '1,248',
-      subtitle: '',
+      value: totalVal,
+      subtitle: 'Registered staff members',
       icon: <Users size={22} />,
       iconColor: 'text-blue-500'
     },
     {
       title: 'Active Users',
-      value: '1,180',
-      subtitle: '94% engagement rate',
+      value: activeVal,
+      subtitle: activeSubtitle,
       icon: <CheckCircle size={22} />,
       iconColor: 'text-green-500'
     },
     {
       title: 'Pending Invites',
-      value: '45',
+      value: pendingVal,
       subtitle: 'Awaiting acceptance',
       icon: <Mail size={22} />,
       iconColor: 'text-orange-400'
     },
     {
       title: 'Admins',
-      value: '12',
+      value: adminsVal,
       subtitle: 'Full system access',
       icon: <ShieldAlert size={22} />,
       iconColor: 'text-purple-500'
@@ -52,7 +60,7 @@ const UserStatCards = () => {
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-      {stats.map((stat, index) => (
+      {statItems.map((stat, index) => (
         <StatCard key={index} {...stat} />
       ))}
     </div>

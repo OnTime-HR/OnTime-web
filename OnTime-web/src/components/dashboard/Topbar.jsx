@@ -12,14 +12,6 @@ const Topbar = ({ title = "Dashboard", subtitle = "Real-time operational metrics
       </div>
       
       <div className="flex items-center gap-4">
-        <div className="relative">
-          <input 
-            type="text" 
-            placeholder="Search..." 
-            className="bg-[#F9A825] text-white placeholder-orange-100 rounded-full pl-6 pr-12 py-2.5 w-80 outline-none shadow-sm"
-          />
-          <Search className="absolute right-5 top-3 text-white" size={18} />
-        </div>
 
         <div className="p-2.5 bg-[#FFF4E5] rounded-full text-[#F9A825] relative cursor-pointer border border-orange-50">
           <div className="absolute top-2.5 right-2.5 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white"></div>
