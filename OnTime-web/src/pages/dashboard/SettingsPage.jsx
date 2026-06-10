@@ -4,6 +4,7 @@ import { db, auth } from '../../services/firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { updateEmail, updateProfile, updatePassword } from 'firebase/auth';
 import { Clock, Shield, Sliders, User, RefreshCw, Save, X, KeyRound, Globe, Landmark } from 'lucide-react';
+import { updateAdminProfileData } from '../../services/adminService';
 
 const SettingsPage = () => {
   const [activeTab, setActiveTab] = useState('General');
@@ -104,38 +105,45 @@ const SettingsPage = () => {
       // Step A: Save system policies to standard standalone document
       const docRef = doc(db, "system_settings", "global_config");
       await setDoc(docRef, {
-        radius: Number(settings.radius),
-        companyCode: settings.companyCode,
-        annualLeaveQuota: Number(settings.annualLeaveQuota),
-        claimCurrency: settings.claimCurrency,
-        workStart: settings.workStart,
-        workEnd: settings.workEnd,
-        gracePeriod: Number(settings.gracePeriod),
-        earlyDepartureAllowance: Number(settings.earlyDepartureAllowance),
-        forcePinReset: settings.forcePinReset,
-        updatedAt: new Date().toISOString()
+        // General Tab
+        radius: Number(settings.radius) || 150,
+        annualLeaveQuota: Number(settings.annualLeaveQuota) || 21,
+        claimCurrency: settings.claimCurrency || "LKR",
+        companyCode: settings.companyCode || "ONTIME-HQ-2026",
+
+        // Attendance Tab
+        workStart: settings.workStart || "08:30",
+        workEnd: settings.workEnd || "17:30",
+        gracePeriod: Number(settings.gracePeriod) || 0,
+        earlyDepartureAllowance: Number(settings.earlyDepartureAllowance) || 0,
+
+        // Security Tab
+        forcePinReset: Boolean(settings.forcePinReset),
+
+        updatedAt: new Date().toISOString(),
+        updatedBy: auth.currentUser?.uid || "unknown"
       }, { merge: true });
 
       // Step B: Update Admin Auth profile metrics if edited
-      const user = auth.currentUser;
-      if (user) {
-        if (settings.adminName !== user.displayName) {
-          await updateProfile(user, { displayName: settings.adminName });
-        }
-        if (settings.adminEmail !== user.email && settings.adminEmail !== "") {
-          await updateEmail(user, settings.adminEmail);
-        }
-        if (settings.adminPassword !== "") {
-          await updatePassword(user, settings.adminPassword);
-        }
-      }
+      await updateAdminProfileData(
+        settings.adminName,
+        settings.adminEmail,
+        settings.adminPassword
+      );
 
-      // Update baseline records mapping state copy
-      setOriginalSettings(JSON.parse(JSON.stringify(settings)));
-      alert("Global configurations successfully written to main cloud nodes!");
+      // Clean out password state string locally so it doesn't stay visible in memory
+      setSettings(prev => ({ ...prev, adminPassword: "" }));
+
+      // Re-verify backup snapshot anchor for the Discard Changes engine
+      setOriginalSettings(JSON.parse(JSON.stringify({
+        ...settings,
+        adminPassword: ""
+      })));
+
+      alert("Global configurations successfully synchronized across all active nodes!");
     } catch (error) {
-      console.error("Configuration persistence transaction failed:", error);
-      alert("Persistence Error: " + error.message);
+      console.error("Configuration persistence failure:", error);
+      alert("Update Blocked: " + error.message);
     } finally {
       setSaving(false);
     }
@@ -166,8 +174,8 @@ const SettingsPage = () => {
               type="button"
               onClick={() => setActiveTab(tab.id)}
               className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold transition-all ${activeTab === tab.id
-                  ? 'bg-[#F9A825] text-white shadow-sm'
-                  : 'text-gray-500 hover:bg-gray-50'
+                ? 'bg-[#F9A825] text-white shadow-sm'
+                : 'text-gray-500 hover:bg-gray-50'
                 }`}
             >
               {tab.icon}
