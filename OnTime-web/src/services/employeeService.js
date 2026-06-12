@@ -1,4 +1,3 @@
-// src/services/employeeService.js
 import { db } from './firebase';
 import { 
   collection, 
@@ -10,7 +9,9 @@ import {
   orderBy, 
   onSnapshot, 
   serverTimestamp,
-  writeBatch
+  writeBatch,
+  getCountFromServer, // <-- ADDED THIS
+  where               // <-- ADDED THIS
 } from 'firebase/firestore';
 
 /**
@@ -109,4 +110,37 @@ export const bulkImportEmployees = async (employees) => {
   });
   
   await batch.commit();
+};
+
+/**
+ * --- NEW FUNCTION ---
+ * Fetches the total count of Employees, Managers, and Admins from the database.
+ * Uses getCountFromServer to save bandwidth and read costs.
+ */
+export const getSystemUserCounts = async () => {
+  try {
+    // 1. Count Employees
+    const employeeQuery = query(collection(db, 'users'), where('role', '==', 'Employee'));
+    const employeeSnapshot = await getCountFromServer(employeeQuery);
+
+    // 2. Count Managers
+    const managerQuery = query(collection(db, 'users'), where('role', '==', 'Manager'));
+    const managerSnapshot = await getCountFromServer(managerQuery);
+
+    // 3. Count Admins
+    // Assuming admins are stored in a separate collection named 'admins'. 
+    // If they are in the 'users' collection instead, change this to:
+    // query(collection(db, 'users'), where('role', '==', 'Admin'))
+    const adminQuery = collection(db, 'admins');
+    const adminSnapshot = await getCountFromServer(adminQuery);
+
+    return {
+      employees: employeeSnapshot.data().count,
+      managers: managerSnapshot.data().count,
+      admins: adminSnapshot.data().count
+    };
+  } catch (error) {
+    console.error("Error fetching user counts:", error);
+    return { employees: 0, managers: 0, admins: 0 }; // Fallback to zeroes if it fails
+  }
 };
