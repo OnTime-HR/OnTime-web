@@ -5,7 +5,8 @@ import {
   onSnapshot, 
   doc, 
   updateDoc, 
-  GeoPoint, 
+  GeoPoint,
+  setDoc, 
   collectionGroup, 
   query, 
   where,
@@ -90,6 +91,35 @@ export const updateOfficeZone = async (officeId, updatedData) => {
     });
   } catch (error) {
     console.error(`Error updating office document ${officeId}:`, error);
+    throw error;
+  }
+};
+
+
+/**
+ * Creates a brand new office zone deployment document in Firestore
+ * @param {string} customId - The unique ID for the office (e.g., "FOC_CAMPUS_2")
+ * @param {Object} zoneData - Object containing name, radius, latitude, and longitude
+ */
+export const createOfficeZone = async (customId, zoneData) => {
+  // Enforce uppercase formatting with no spaces for document IDs
+  const cleanId = customId.trim().toUpperCase().replace(/\s+/g, '_');
+  const officeDocRef = doc(db, "offices", cleanId);
+  
+  // Verify if an office with this ID already exists
+  const docSnap = await getDoc(officeDocRef);
+  if (docSnap.exists()) {
+    throw new Error(`A zone with the ID "${cleanId}" already exists in the database.`);
+  }
+
+  try {
+    await setDoc(officeDocRef, {
+      name: zoneData.name,
+      radius: Number(zoneData.radius),
+      location: new GeoPoint(Number(zoneData.latitude), Number(zoneData.longitude))
+    });
+  } catch (error) {
+    console.error(`Error creating new office document ${cleanId}:`, error);
     throw error;
   }
 };
