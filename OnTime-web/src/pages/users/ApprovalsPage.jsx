@@ -1,10 +1,10 @@
 // src/pages/users/ApprovalsPage.jsx
 import React, { useState, useEffect } from 'react';
-import { Hourglass, CheckCircle, DollarSign, Download, FileText, FileSpreadsheet, History, Search, Trash2, AlertTriangle } from 'lucide-react';
+import { Hourglass, CheckCircle, DollarSign, Download, FileText, FileSpreadsheet, History, Search, Trash2, AlertTriangle, X } from 'lucide-react';
 import { updateRequestStatus } from '../../services/approvalService';
 import { generateAndArchiveReport, downloadArchivedFile, deleteArchivedRecord } from '../../services/reportService';
 import { db } from '../../services/firebase';
-import { collection, query, onSnapshot } from 'firebase/firestore'; // Removed orderBy to prevent index crash
+import { collection, query, onSnapshot } from 'firebase/firestore';
 
 const ApprovalsPage = () => {
   const [activeTab, setActiveTab] = useState('All Requests');
@@ -18,6 +18,12 @@ const ApprovalsPage = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [deleteModal, setDeleteModal] = useState({ isOpen: false, logId: null });
 
+  // NEW: MODAL & DECISION STATES
+  const [selectedRequest, setSelectedRequest] = useState(null);
+  const [modalStep, setModalStep] = useState('details'); // 'details', 'reject_reason', 'confirm'
+  const [rejectionReason, setRejectionReason] = useState('');
+  const [pendingDecision, setPendingDecision] = useState(null); // 'Approved' or 'Rejected'
+
   // LIVE METRIC STATES
   const [metrics, setMetrics] = useState({
     pendingCount: 0,
@@ -25,7 +31,6 @@ const ApprovalsPage = () => {
     totalClaimsValue: 0
   });
 
-  // 1. Live stream calculation engine setup
   useEffect(() => {
     const requestsRef = collection(db, "leave_requests");
     
@@ -62,7 +67,9 @@ const ApprovalsPage = () => {
           type: item.leaveType || 'Leave',
           dateRequested: appliedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
           duration: item.totalDays || 1,
-          status: item.status || 'Pending'
+          status: item.status || 'Pending',
+          // Assuming you might have these fields in DB for the details view
+          reason: item.reason || 'No additional details provided by the employee.',
         };
       });
 
@@ -75,7 +82,6 @@ const ApprovalsPage = () => {
       setAllRequests(formatted);
     });
 
-    // FIXED: Swapped out the old index-dependent query block for a clean, error-free raw collection stream
     const archiveQuery = query(collection(db, "reports_archive"));
     const unsubscribeArchive = onSnapshot(archiveQuery, (snapshot) => {
       const logs = snapshot.docs.map(doc => ({
@@ -84,7 +90,6 @@ const ApprovalsPage = () => {
         dateFormatted: doc.data().downloadedAt?.toDate().toLocaleString() || 'Just Now'
       }));
 
-      // In-Memory Sorting Layer: Sorts descending (newest on top) without needing Firebase Index rules
       const sortedLogs = logs.sort((a, b) => {
         const dateA = a.downloadedAt?.toDate() || new Date(0);
         const dateB = b.downloadedAt?.toDate() || new Date(0);
@@ -139,11 +144,52 @@ const ApprovalsPage = () => {
     }
   };
 
-  const handleDecision = async (request, decision) => {
-    setLoadingId(request.id);
+  // --- NEW: MODAL CONTROL FUNCTIONS ---
+  const openDetailsModal = (req) => {
+    setSelectedRequest(req);
+    setModalStep('details');
+    setRejectionReason('');
+    setPendingDecision(null);
+  };
+
+  const closeDetailsModal = () => {
+    setSelectedRequest(null);
+    setTimeout(() => setModalStep('details'), 200); // Reset after animation
+  };
+
+  const initiateApprove = () => {
+    setPendingDecision('Approved');
+    setModalStep('confirm');
+  };
+
+  const initiateReject = () => {
+    setModalStep('reject_reason');
+  };
+
+  const proceedWithRejection = () => {
+    if (!rejectionReason.trim()) {
+      alert("Please provide a reason for the rejection.");
+      return;
+    }
+    setPendingDecision('Rejected');
+    setModalStep('confirm');
+  };
+
+  const executeFinalDecision = async () => {
+    setLoadingId(selectedRequest.id);
     try {
-      await updateRequestStatus(request.id, request.employeeId, request.type, request.duration, decision);
-      alert(`Request has been successfully ${decision.toLowerCase()}!`);
+      // Passing the reason as an extra parameter to your service
+      await updateRequestStatus(
+        selectedRequest.id, 
+        selectedRequest.employeeId, 
+        selectedRequest.type, 
+        selectedRequest.duration, 
+        pendingDecision,
+        rejectionReason // NEW: Passed to service
+      );
+      
+      closeDetailsModal();
+      // Optional: use a toast notification here instead of alert for better UX!
     } catch (error) {
       alert("Error processing transaction request: " + error.message);
     } finally {
@@ -191,7 +237,7 @@ const ApprovalsPage = () => {
       {/* EVALUATION TABLE */}
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm mb-8 overflow-hidden">
         <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-[#FFF9F0]/30">
-          <h3 className="font-bold text-gray-900 text-base">Pending Approvals</h3>
+          <h3 className="font-bold text-gray-900 text-base">Pending Requests</h3>
           <div className="flex bg-gray-100/70 p-1 rounded-xl border border-gray-200/50">
             {['All Requests', 'Leave', 'Medical', 'Expense'].map((tab) => (
               <button
@@ -216,18 +262,21 @@ const ApprovalsPage = () => {
                 <th className="p-4">Date Requested</th>
                 <th className="p-4">Duration</th>
                 <th className="p-4">Status</th>
-                <th className="p-4 pr-6 text-center">Quick Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 text-sm">
               {filteredRequests.map((req) => (
-                <tr key={req.id} className="hover:bg-gray-50/40 transition-colors">
+                <tr 
+                  key={req.id} 
+                  onClick={() => openDetailsModal(req)}
+                  className="hover:bg-gray-50/80 transition-colors cursor-pointer group"
+                >
                   <td className="p-4 pl-6 flex items-center gap-3">
                     <div className="w-8 h-8 rounded-full bg-orange-100 flex items-center justify-center font-bold text-xs text-[#F9A825]">
                       {req.employeeName.charAt(0)}
                     </div>
                     <div>
-                      <h4 className="font-bold text-gray-800 leading-tight">{req.employeeName}</h4>
+                      <h4 className="font-bold text-gray-800 leading-tight group-hover:text-[#F9A825] transition-colors">{req.employeeName}</h4>
                       <p className="text-gray-400 text-[11px] font-medium">{req.role}</p>
                     </div>
                   </td>
@@ -240,27 +289,11 @@ const ApprovalsPage = () => {
                   </td>
                   <td className="p-4 text-gray-500">{req.dateRequested}</td>
                   <td className="p-4 text-gray-700 font-semibold">{req.duration} Day(s)</td>
-                  <td className="p-4">
+                  <td className="p-4 pr-6">
                     <span className="flex items-center gap-1.5 text-xs text-amber-600 font-bold bg-amber-50 px-2 py-0.5 rounded-full w-fit">
                       <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
                       {req.status}
                     </span>
-                  </td>
-                  <td className="p-4 pr-6 text-center space-x-2">
-                    <button 
-                      disabled={loadingId !== null}
-                      onClick={() => handleDecision(req, 'Approved')}
-                      className="bg-[#F9A825] text-white text-xs font-bold px-3 py-1.5 rounded-lg disabled:opacity-50"
-                    >
-                      Approve
-                    </button>
-                    <button 
-                      disabled={loadingId !== null}
-                      onClick={() => handleDecision(req, 'Rejected')}
-                      className="border border-gray-200 text-gray-500 text-xs font-bold px-3 py-1.5 rounded-lg disabled:opacity-50"
-                    >
-                      Reject
-                    </button>
                   </td>
                 </tr>
               ))}
@@ -409,6 +442,124 @@ const ApprovalsPage = () => {
                 Delete Log
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* NEW: DYNAMIC REQUEST DETAILS & DECISION MODAL */}
+      {selectedRequest && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 transition-opacity">
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-xl max-w-md w-full p-6 animate-in fade-in zoom-in-95 duration-200">
+            
+            {/* Header */}
+            <div className="flex justify-between items-start mb-6">
+              <div>
+                <h3 className="text-lg font-bold text-gray-900">Request Evaluation</h3>
+                <p className="text-xs text-gray-400">Review details and authorize action</p>
+              </div>
+              <button onClick={closeDetailsModal} className="p-2 text-gray-400 hover:bg-gray-100 rounded-full transition-colors">
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* STEP 1: Details View */}
+            {modalStep === 'details' && (
+              <>
+                <div className="bg-gray-50 rounded-xl p-4 mb-6 space-y-4">
+                  <div className="flex justify-between border-b border-gray-200 pb-3">
+                    <span className="text-xs text-gray-500 font-semibold uppercase">Applicant</span>
+                    <span className="text-sm font-bold text-gray-900">{selectedRequest.employeeName}</span>
+                  </div>
+                  <div className="flex justify-between border-b border-gray-200 pb-3">
+                    <span className="text-xs text-gray-500 font-semibold uppercase">Type</span>
+                    <span className="text-sm font-bold text-[#F9A825]">{selectedRequest.type}</span>
+                  </div>
+                  <div className="flex justify-between border-b border-gray-200 pb-3">
+                    <span className="text-xs text-gray-500 font-semibold uppercase">Duration</span>
+                    <span className="text-sm font-bold text-gray-900">{selectedRequest.duration} Day(s)</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-xs text-gray-500 font-semibold uppercase">Date Requested</span>
+                    <span className="text-sm font-bold text-gray-900">{selectedRequest.dateRequested}</span>
+                  </div>
+                </div>
+
+                <div className="mb-6">
+                  <h4 className="text-xs text-gray-500 font-semibold uppercase mb-2">Request Reason / Notes</h4>
+                  <p className="text-sm text-gray-700 bg-white border border-gray-200 rounded-xl p-3 leading-relaxed">
+                    {selectedRequest.reason}
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 pt-2">
+                  <button onClick={initiateReject} className="w-full bg-white border border-red-200 text-red-500 hover:bg-red-50 text-xs font-bold py-3 rounded-xl transition-colors">
+                    Reject Request
+                  </button>
+                  <button onClick={initiateApprove} className="w-full bg-[#F9A825] hover:bg-amber-600 text-white text-xs font-bold py-3 rounded-xl shadow-sm transition-all">
+                    Approve Request
+                  </button>
+                </div>
+              </>
+            )}
+
+            {/* STEP 2: Rejection Reason Input */}
+            {modalStep === 'reject_reason' && (
+              <div className="animate-in fade-in slide-in-from-right-4 duration-200">
+                <div className="mb-6">
+                  <label className="block text-sm font-bold text-gray-900 mb-2">Reason for Rejection</label>
+                  <p className="text-xs text-gray-500 mb-3">Please provide a reason. This will be visible to the employee.</p>
+                  <textarea
+                    autoFocus
+                    value={rejectionReason}
+                    onChange={(e) => setRejectionReason(e.target.value)}
+                    placeholder="Type reason here..."
+                    className="w-full border border-gray-200 rounded-xl p-3 text-sm text-gray-700 outline-none focus:border-red-400 focus:ring-1 focus:ring-red-400 min-h-[120px] resize-none transition-all"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <button onClick={() => setModalStep('details')} className="w-full bg-gray-50 hover:bg-gray-100 border border-gray-200 text-gray-500 text-xs font-bold py-3 rounded-xl transition-colors">
+                    Back
+                  </button>
+                  <button onClick={proceedWithRejection} className="w-full bg-red-500 hover:bg-red-600 text-white text-xs font-bold py-3 rounded-xl shadow-sm transition-all">
+                    Proceed to Reject
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* STEP 3: Final Confirmation */}
+            {modalStep === 'confirm' && (
+              <div className="text-center animate-in fade-in slide-in-from-right-4 duration-200 py-4">
+                <div className={`w-14 h-14 rounded-full mx-auto flex items-center justify-center mb-4 ${
+                  pendingDecision === 'Approved' ? 'bg-amber-50 text-[#F9A825]' : 'bg-red-50 text-red-500'
+                }`}>
+                  <AlertTriangle size={28} />
+                </div>
+                <h4 className="text-lg font-bold text-gray-900 mb-2">Confirm {pendingDecision}</h4>
+                <p className="text-sm text-gray-500 mb-8 px-4 leading-relaxed">
+                  Are you sure you want to officially <span className="font-bold text-gray-700">{pendingDecision.toLowerCase()}</span> this request for {selectedRequest.employeeName}? 
+                </p>
+                <div className="grid grid-cols-2 gap-3">
+                  <button 
+                    disabled={loadingId !== null}
+                    onClick={() => setModalStep('details')} 
+                    className="w-full bg-gray-50 hover:bg-gray-100 border border-gray-200 text-gray-500 text-xs font-bold py-3 rounded-xl transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    disabled={loadingId !== null}
+                    onClick={executeFinalDecision} 
+                    className={`w-full text-white text-xs font-bold py-3 rounded-xl shadow-sm transition-all flex items-center justify-center ${
+                      pendingDecision === 'Approved' ? 'bg-[#F9A825] hover:bg-amber-600' : 'bg-red-500 hover:bg-red-600'
+                    }`}
+                  >
+                    {loadingId ? 'Processing...' : `Yes, ${pendingDecision}`}
+                  </button>
+                </div>
+              </div>
+            )}
+
           </div>
         </div>
       )}
