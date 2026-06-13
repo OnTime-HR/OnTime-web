@@ -1,14 +1,10 @@
 // src/services/approvalService.js
 import { db } from './firebase';
-import { collection, query, where, onSnapshot, doc, updateDoc, increment } from 'firebase/firestore';
+// REMOVED arrayUnion, ADDED getDoc
+import { collection, query, where, onSnapshot, doc, getDoc, updateDoc, increment, addDoc, serverTimestamp } from 'firebase/firestore';
 
-/**
- * Live streams all pending leave and medical requests
- * Collection: leave_requests
- */
 export const streamPendingRequests = (callback) => {
   const requestsRef = collection(db, "leave_requests");
-  // Query to filter only requests that are waiting for approval
   const q = query(requestsRef, where("status", "==", "Pending"));
 
   return onSnapshot(q, (snapshot) => {
@@ -22,28 +18,66 @@ export const streamPendingRequests = (callback) => {
   });
 };
 
-/**
- * Updates a request status and automatically adjusts employee leave balance if approved
- */
-export const updateRequestStatus = async (requestId, employeeId, leaveType, totalDays, newStatus) => {
+export const updateRequestStatus = async (requestId, employeeId, leaveType, totalDays, newStatus, actionReason = "", previousStatus = "Pending") => {
   const requestDocRef = doc(db, "leave_requests", requestId);
   const employeeDocRef = doc(db, "users", employeeId);
 
   try {
-    // 1. Update the request status to approved or rejected
-    await updateDoc(requestDocRef, {
-      status: newStatus,
-      reviewedAt: new Date(),
-      reviewedBy: "manager" // Static fallback until Web Auth is added
-    });
+    // 1. Securely fetch the current document first
+    const requestSnap = await getDoc(requestDocRef);
+    const currentData = requestSnap.exists() ? requestSnap.data() : {};
+    
+    // Grab the old history list (or start a fresh empty list if it's the first decision)
+    const existingHistory = currentData.decisionHistory || []; 
 
-    // 2. If approved, deduct the requested days from the employee's balance in Firestore
-    if (newStatus === "Approved") {
+    // 2. Create our new historical log entry
+    const newLog = {
+      action: newStatus,
+      reviewer: "System Admin",
+      reason: actionReason || "No reason provided",
+      timestamp: new Date().toISOString()
+    };
+
+    // 3. Update the request and securely overwrite the history with our combined list
+    const updatePayload = {
+      status: newStatus,
+      reviewedAt: serverTimestamp(), 
+      reviewedBy: "System Admin",
+      actionReason: actionReason || "", // Keep for fallback purposes
+      decisionHistory: [...existingHistory, newLog] // Safely pushes the new log onto the end!
+    };
+
+    await updateDoc(requestDocRef, updatePayload);
+
+    // 4. LEAVE BALANCE MATH LOGIC
+    let balanceAdjustment = 0;
+
+    if (previousStatus !== "Approved" && newStatus === "Approved") {
+      balanceAdjustment = -totalDays; // Deduct
+    } else if (previousStatus === "Approved" && newStatus === "Rejected") {
+      balanceAdjustment = totalDays;  // Refund
+    }
+
+    if (balanceAdjustment !== 0) {
       await updateDoc(employeeDocRef, {
-        // Uses standard field from your ER diagram: leave_bal
-        leave_bal: increment(-totalDays)
+        leave_bal: increment(balanceAdjustment)
       });
     }
+
+    // 5. Fire a notification directly to the employee's account
+    const notificationsRef = collection(db, "users", employeeId, "notifications");
+    
+    await addDoc(notificationsRef, {
+      title: `Leave Request ${newStatus}`,
+      message: newStatus === "Approved" 
+        ? `Your request for ${totalDays} day(s) of ${leaveType} has been approved.` 
+        : `Your request for ${leaveType} was rejected/revoked. Reason: ${actionReason}`,
+      type: "leave_update",
+      isRead: false,
+      createdAt: serverTimestamp(),
+      relatedRequestId: requestId
+    });
+
   } catch (error) {
     console.error(`Failed to execute request decision workflow:`, error);
     throw error;
