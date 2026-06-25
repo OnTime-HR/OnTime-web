@@ -1,8 +1,22 @@
 // src/components/dashboard/NewsCard.jsx
 import React from 'react';
-import { Calendar, Layers } from 'lucide-react';
+import { Calendar } from 'lucide-react';
 
-const NewsCard = ({ id, title, description, time, image, isFeatured, status, startDate, endDate, linkUrl, onClick }) => {
+const NewsCard = ({ 
+  id, 
+  title, 
+  description, 
+  time, 
+  image, 
+  isFeatured, 
+  status, 
+  startDate, 
+  endDate, 
+  linkUrl, 
+  videoUrl, // ADDED: Captures the video URL from parent mapping
+  fileUrl,   // ADDED: Captures the PDF/Doc URL from parent mapping
+  onClick 
+}) => {
   
   // Custom Tailwind status indicator map colors
   const statusColors = {
@@ -14,10 +28,29 @@ const NewsCard = ({ id, title, description, time, image, isFeatured, status, sta
 
   const activeStatus = status || "Active";
 
+  // Shared function to handle the click event and forward all media variables
+  const handleItemClick = () => {
+    if (onClick) {
+      onClick({ 
+        id, 
+        title, 
+        description, 
+        time, 
+        image, 
+        status: activeStatus, 
+        startDate, 
+        endDate, 
+        linkUrl,
+        videoUrl: videoUrl || '', // FIXED: Explicitly forwards the video URL parameter
+        fileUrl: fileUrl || ''    // FIXED: Explicitly forwards the file URL parameter
+      });
+    }
+  };
+
   if (isFeatured) {
     return (
       <div 
-        onClick={() => onClick({ id, title, description, time, image, status: activeStatus, startDate, endDate, linkUrl })}
+        onClick={handleItemClick}
         className="relative rounded-2xl overflow-hidden aspect-[1.5/1] mb-5 group cursor-pointer border border-gray-100 shadow-md transform hover:-translate-y-0.5 transition-all"
       >
         <img src={image} alt={title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
@@ -40,7 +73,7 @@ const NewsCard = ({ id, title, description, time, image, isFeatured, status, sta
 
   return (
     <div 
-      onClick={() => onClick({ id, title, description, time, image, status: activeStatus, startDate, endDate, linkUrl })}
+      onClick={handleItemClick}
       className="flex gap-3 py-3 border-b border-gray-50 last:border-0 group cursor-pointer hover:bg-gray-50/50 px-2 rounded-xl transition-colors"
     >
       <img src={image} alt={title} className="w-12 h-12 rounded-xl object-cover flex-shrink-0 border border-gray-100 shadow-sm" />
