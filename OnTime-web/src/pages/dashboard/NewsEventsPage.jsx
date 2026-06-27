@@ -2,38 +2,65 @@
 import React, { useState, useEffect } from 'react';
 import { Megaphone, Pin, Edit, Plus, X, CheckCircle, AlertCircle } from 'lucide-react';
 import { db } from '../../services/firebase';
-import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
+// FIXED: Added updateDoc and doc to imports for the auto-expiration engine
+import { collection, onSnapshot, query, orderBy, updateDoc, doc } from 'firebase/firestore';
 import NewPostModal from '../../components/dashboard/NewPostModal';
 
 const NewsEventsPage = () => {
   const [newsList, setNewsList] = useState([]);
-  
-  // NEW: Interactive State tracker for managing data table filter categories
-  const [activeFilter, setActiveFilter] = useState('All'); // Options: 'All' | 'Expired'
-
-  // Dual Modal Action control variables
+  const [activeFilter, setActiveFilter] = useState('All'); 
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedPost, setSelectedPost] = useState(null);
-
   const [toast, setToast] = useState({ isOpen: false, type: 'success', message: '' });
 
   useEffect(() => {
     const qNews = query(collection(db, "company_news"), orderBy("createdAt", "desc"));
+    
     const unsubscribe = onSnapshot(qNews, (snap) => {
-      setNewsList(snap.docs.map(doc => ({
-        id: doc.id,
-        title: doc.data().title,
-        description: doc.data().description,
-        status: doc.data().status || 'Active',
-        linkUrl: doc.data().linkUrl || '',
-        startDate: doc.data().startDate || '',
-        endDate: doc.data().endDate || '',
-        imageUrl: doc.data().imageUrl || '',
-        videoUrl: doc.data().videoUrl || '',
-        fileUrl: doc.data().fileUrl || '',
-        image: doc.data().imageUrl || "https://images.pexels.com/photos/3183150/pexels-photo-3183150.jpeg",
-        date: doc.data().createdAt?.toDate().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) || 'Recent'
-      })));
+      // 1. Establish strict midnight cutoff for accurate date comparisons
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      const loadedNews = [];
+
+      snap.docs.forEach(docSnap => {
+        const data = docSnap.data();
+        let currentStatus = data.status || 'Active';
+
+        // ======================================================================
+        // REAL-TIME AUTO-EXPIRATION ENGINE
+        // ======================================================================
+        if (data.endDate && currentStatus === 'Active') {
+          const endObj = new Date(data.endDate);
+          endObj.setHours(0, 0, 0, 0);
+
+          // If the post end date is strictly in the past, auto-expire it
+          if (endObj < today) {
+            currentStatus = 'Expired';
+            // Asynchronously update the live database quietly in the background
+            updateDoc(doc(db, "company_news", docSnap.id), { status: 'Expired' })
+              .catch(err => console.error("Auto-expire DB update failed:", err));
+          }
+        }
+
+        loadedNews.push({
+          id: docSnap.id,
+          title: data.title,
+          description: data.description,
+          status: currentStatus, // Renders the securely evaluated status
+          linkUrl: data.linkUrl || '',
+          startDate: data.startDate || '',
+          endDate: data.endDate || '',
+          imageUrl: data.imageUrl || '',
+          videoUrl: data.videoUrl || '',
+          fileUrl: data.fileUrl || '',
+          image: data.imageUrl || "https://images.pexels.com/photos/3183150/pexels-photo-3183150.jpeg",
+          date: data.createdAt?.toDate().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) || 'Recent',
+          rawCreatedAt: data.createdAt // Preserves exact chronological timeline
+        });
+      });
+
+      setNewsList(loadedNews);
     });
 
     return () => unsubscribe();
@@ -65,10 +92,9 @@ const NewsEventsPage = () => {
     Expired: 'bg-gray-50 text-gray-500 border-gray-100'
   };
 
-  // DYNAMIC COMPUTATION: Filter data array rows cleanly depending on selected metric card
   const filteredNewsList = newsList.filter(item => {
     if (activeFilter === 'Expired') return item.status === 'Expired';
-    return true; // Returns all entries if 'All' filter state is selected
+    return true; 
   });
 
   const expiredCount = newsList.filter(n => n.status === 'Expired').length;
@@ -76,10 +102,8 @@ const NewsEventsPage = () => {
   return (
     <div className="p-10 relative">
 
-      {/* SECTION 1: METRICS ANALYTICS GRID (UPDATED TO TWO PROPORTIONAL COLUMNS) */}
       <div className="grid grid-cols-2 gap-8 mb-8">
         
-        {/* CARD SLOT 1: TOTAL ANNOUNCEMENTS VIEW (CLICK TO RESET FILTERS) */}
         <div 
           onClick={() => setActiveFilter('All')}
           className={`p-6 rounded-2xl border shadow-sm flex items-center justify-between cursor-pointer transition-all transform hover:-translate-y-0.5 ${
@@ -96,7 +120,6 @@ const NewsEventsPage = () => {
           <div className="p-3 bg-[#FFF4E5] rounded-xl text-[#F9A825]"><Megaphone size={22} /></div>
         </div>
 
-        {/* CARD SLOT 2: EXPIRED ARCHIVES VIEW (CLICK TO ISOLATE OUTDATED POSTS) */}
         <div 
           onClick={() => setActiveFilter('Expired')}
           className={`p-6 rounded-2xl border shadow-sm flex items-center justify-between cursor-pointer transition-all transform hover:-translate-y-0.5 ${
@@ -115,11 +138,9 @@ const NewsEventsPage = () => {
 
       </div>
 
-      {/* SECTION 2: Management Table View Grid */}
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
         <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-[#FFF9F0]/30">
           
-
           <button
             type="button" onClick={handleOpenCreateModal}
             className="bg-[#F9A825] hover:bg-orange-500 text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow-md transition-colors flex items-center gap-2 border-0 cursor-pointer outline-none"
@@ -190,7 +211,6 @@ const NewsEventsPage = () => {
         triggerToast={triggerToastNotification}
       />
 
-      {/* TOAST SYSTEM COMPONENT */}
       {toast.isOpen && (
         <div className="fixed bottom-6 right-6 z-[10000] flex items-center gap-3 bg-slate-900 text-white px-5 py-3.5 rounded-2xl shadow-2xl animate-in slide-in-from-bottom-5 duration-200 min-w-[280px]">
           {toast.type === 'success' ? (
