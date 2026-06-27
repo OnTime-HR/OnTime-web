@@ -1,6 +1,6 @@
 // src/components/dashboard/Sidebar.jsx
 import React, { useState } from 'react';
-import { LayoutGrid, Users, MapPin, FileCheck, MessageSquare, Settings, LogOut, ShieldAlert, Trash2 } from 'lucide-react';
+import { LayoutGrid, Users, MapPin, FileCheck, MessageSquare, Settings, LogOut, ShieldAlert, Trash2, Calendar } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { auth } from '../../services/firebase';
 import { signOut } from 'firebase/auth';
@@ -15,9 +15,10 @@ const Sidebar = () => {
 
   const menuItems = [
     { icon: <LayoutGrid size={22} />, label: 'Dashboard', path: '/dashboard' },
-    { icon: <Users size={22} />, label: 'User and Role Management', path: '/users' },
-    { icon: <MapPin size={22} />, label: 'Geofencing and Operations', path: '/geofencing-and-operations' }, 
-    { icon: <FileCheck size={22} />, label: 'Approvals and Reports', path: '/reports' },
+    { icon: <Users size={22} />, label: 'User & Role Management', path: '/users' },
+    { icon: <MapPin size={22} />, label: 'Geofencing & Operations', path: '/geofencing-and-operations' }, 
+    { icon: <FileCheck size={22} />, label: 'Approvals & Reports', path: '/reports' },
+     { icon: <Calendar size={22} />, label: 'Shifts & Attendence', path: '/shifts' },
     { icon: <MessageSquare size={22} />, label: 'News & Events', path: '/news' },
     { icon: <Settings size={22} />, label: 'Settings', path: '/settings' },
     { icon: <Trash2 size={22} />, label: 'Trash Bin', path: '/trash' }, 
