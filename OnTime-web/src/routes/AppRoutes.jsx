@@ -8,8 +8,8 @@ import GeofencingPage from '../pages/dashboard/GeofencingPage';
 import ApprovalsPage from '../pages/users/ApprovalsPage';
 import NewsEventsPage from '../pages/dashboard/NewsEventsPage';
 import SettingsPage from '../pages/dashboard/SettingsPage';
+import TrashBinPage from '../pages/dashboard/TrashBinPage'; // FIXED: Imported your new Trash Bin page file
 
-// IMPORTANT: Cleaned up MfaVerifyPage import line to fix compilation crash
 import LoginPage from '../pages/dashboard/LoginPage';
 import ProtectedRoute from './ProtectedRoute';
 
@@ -81,6 +81,18 @@ const AppRoutes = () => {
             <ProtectedRoute>
               <DashboardLayout title="Settings" subtitle="Configure system configurations, geofencing guidelines, and global alerts">
                 <SettingsPage />
+              </DashboardLayout>
+            </ProtectedRoute>
+          } 
+        />
+
+        {/* FIXED: Registered the secure route for the new Trash Bin system */}
+        <Route 
+          path="/trash" 
+          element={
+            <ProtectedRoute>
+              <DashboardLayout title="Trash Bin" subtitle="Review archived records and restore items safely within 30 days">
+                <TrashBinPage />
               </DashboardLayout>
             </ProtectedRoute>
           } 
