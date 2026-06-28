@@ -1,6 +1,6 @@
 // src/pages/dashboard/TrashBinPage.jsx
 import React, { useState, useEffect } from 'react';
-import { Trash2, RotateCcw, ShieldAlert, CheckCircle, AlertCircle, RefreshCw, MessageSquare, Users, MapPin, FileCheck, X, AlertTriangle, ListChecks } from 'lucide-react';
+import { Trash2, RotateCcw, ShieldAlert, CheckCircle, AlertCircle, RefreshCw, MessageSquare, Users, MapPin, FileCheck, X, AlertTriangle, ListChecks, Clock } from 'lucide-react';
 import { db } from '../../services/firebase';
 import { collection, onSnapshot, query, orderBy, doc, setDoc, addDoc, deleteDoc, GeoPoint } from 'firebase/firestore';
 
@@ -72,9 +72,7 @@ const TrashBinPage = () => {
     setSelectedItems([]); // Reset selection when exiting mode
   };
 
-  // ============================================================================
   // SINGLE RECORD ENGINE
-  // ============================================================================
   const executeRestore = async () => {
     if (!restoreModalItem || loadingItemId) return;
     setLoadingItemId(restoreModalItem.id);
@@ -120,9 +118,7 @@ const TrashBinPage = () => {
     }
   };
 
-  // ============================================================================
   // BULK RECORD ENGINE (PROFESSIONAL MULTI-THREADING)
-  // ============================================================================
   const executeBulkRestore = async () => {
     setBulkProcessing(true);
     try {
@@ -186,9 +182,7 @@ const TrashBinPage = () => {
     }
   };
 
-  // ============================================================================
   // UI HELPERS
-  // ============================================================================
   const getSourceIcon = (type) => {
     switch(type) {
       case 'company_news': return <MessageSquare size={14} className="text-amber-600" />;
@@ -197,6 +191,7 @@ const TrashBinPage = () => {
       case 'geofencing': return <MapPin size={14} className="text-emerald-600" />;
       case 'reports_archive': 
       case 'reports': return <FileCheck size={14} className="text-purple-600" />;
+      case 'shifts': return <Clock size={14} className="text-indigo-600" />;
       default: return <FileCheck size={14} className="text-gray-600" />;
     }
   };
@@ -207,7 +202,8 @@ const TrashBinPage = () => {
     offices: 'Operational Locations', 
     geofencing: 'Operational Locations',
     reports_archive: 'System Log Reports',
-    reports: 'System Log Reports'
+    reports: 'System Log Reports',
+    shifts: 'Shift Policies'
   };
 
   const extractFileName = (url) => {
@@ -247,7 +243,7 @@ const TrashBinPage = () => {
             <p className="text-xs text-gray-400 mt-0.5">Filter items by category, review metrics data, and trigger real-time record recoveries.</p>
           </div>
           
-          <div className="flex flex-wrap gap-2 items-center">
+          <div className="flex gap-2 items-center overflow-x-auto w-full xl:w-auto pb-2 xl:pb-0 custom-scrollbar min-w-0">
             {/* Action Bar Toggle */}
             <div className="flex gap-2 mr-4 pr-4 border-r border-gray-200">
               <button 
@@ -269,10 +265,11 @@ const TrashBinPage = () => {
 
             {/* Filters */}
             {[
-              { id: 'All', label: 'All Fields' }, { id: 'company_news', label: 'News Feed' },
-              // { id: 'users', label: 'Users & Roles' }, 
+              { id: 'All', label: 'All' }, 
+              { id: 'company_news', label: 'News' },
               { id: 'offices', label: 'Locations' }, 
-              { id: 'reports_archive', label: 'Reports Log' } 
+              { id: 'shifts', label: 'Shifts' }, 
+              { id: 'reports_archive', label: 'Reports' } 
             ].map(chip => (
               <button
                 key={chip.id} type="button" 
@@ -386,9 +383,7 @@ const TrashBinPage = () => {
         </div>
       </div>
 
-      {/* ========================================================= */}
       {/* SINGLE ITEM MODALS */}
-      {/* ========================================================= */}
       {restoreModalItem && (
         <div className="fixed inset-0 w-screen h-screen bg-slate-950/70 backdrop-blur-sm flex items-center justify-center z-[999999] p-4 pointer-events-auto">
           <div className="bg-white rounded-[2rem] w-full max-w-sm p-6 text-center shadow-2xl border border-gray-50 animate-in zoom-in-95 duration-150">
@@ -421,9 +416,7 @@ const TrashBinPage = () => {
         </div>
       )}
 
-      {/* ========================================================= */}
       {/* BULK ACTION MODALS */}
-      {/* ========================================================= */}
       {bulkRestoreModal && (
         <div className="fixed inset-0 w-screen h-screen bg-slate-950/70 backdrop-blur-sm flex items-center justify-center z-[999999] p-4 pointer-events-auto">
           <div className="bg-white rounded-[2rem] w-full max-w-sm p-6 text-center shadow-2xl border border-gray-50 animate-in zoom-in-95 duration-150">
