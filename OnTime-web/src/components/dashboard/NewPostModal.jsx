@@ -18,6 +18,7 @@ const NewPostModal = ({ isOpen, onClose, editPostData = null, triggerToast }) =>
   const [loading, setLoading] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
+  // Initialize form data on open
   useEffect(() => {
     if (isOpen) {
       setShowDeleteConfirm(false);
@@ -40,6 +41,32 @@ const NewPostModal = ({ isOpen, onClose, editPostData = null, triggerToast }) =>
       }
     }
   }, [isOpen, editPostData]);
+
+  // ==========================================
+  // REAL-TIME AUTO-EXPIRATION ENGINE
+  // ==========================================
+  useEffect(() => {
+    if (formData.endDate) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0); // Strip time for accurate date comparison
+      
+      const endDateObj = new Date(formData.endDate);
+      endDateObj.setHours(0, 0, 0, 0);
+
+      // If the selected end date is in the past, force status to Expired
+      if (endDateObj < today) {
+        if (formData.status !== 'Expired') {
+          setFormData(prev => ({ ...prev, status: 'Expired' }));
+        }
+      } 
+      // If the end date is today or in the future, automatically switch to Active
+      else if (endDateObj >= today) {
+        if (formData.status === 'Expired') {
+          setFormData(prev => ({ ...prev, status: 'Active' }));
+        }
+      }
+    }
+  }, [formData.endDate]);
 
   if (!isOpen) return null;
 
@@ -79,9 +106,26 @@ const NewPostModal = ({ isOpen, onClose, editPostData = null, triggerToast }) =>
     if (loading) return;
     setLoading(true);
 
+    // Double-check expiration at the exact moment of submission
+    let finalStatus = formData.status;
+    if (formData.endDate) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const end = new Date(formData.endDate);
+      end.setHours(0, 0, 0, 0);
+      if (end < today) finalStatus = 'Expired';
+    }
+
     const payload = {
-      title: formData.title, description: formData.description, status: formData.status, linkUrl: formData.linkUrl, startDate: formData.startDate, endDate: formData.endDate,
-      imageUrl: formData.imageUrl || "https://images.pexels.com/photos/3183150/pexels-photo-3183150.jpeg", videoUrl: formData.videoUrl, fileUrl: formData.fileUrl,
+      title: formData.title, 
+      description: formData.description, 
+      status: finalStatus, 
+      linkUrl: formData.linkUrl, 
+      startDate: formData.startDate, 
+      endDate: formData.endDate,
+      imageUrl: formData.imageUrl || "https://images.pexels.com/photos/3183150/pexels-photo-3183150.jpeg", 
+      videoUrl: formData.videoUrl, 
+      fileUrl: formData.fileUrl,
       updatedAt: serverTimestamp()
     };
 
@@ -107,7 +151,6 @@ const NewPostModal = ({ isOpen, onClose, editPostData = null, triggerToast }) =>
     setLoading(true);
     setShowDeleteConfirm(false);
     try {
-      // 1. Stage complete snapshot parameters WITH TIMESTAMPS into global trash registry
       await addDoc(collection(db, "trash_bin"), {
         originalCollection: "company_news",
         originalId: editPostData.id,
@@ -122,13 +165,11 @@ const NewPostModal = ({ isOpen, onClose, editPostData = null, triggerToast }) =>
           imageUrl: editPostData.imageUrl || '',
           videoUrl: editPostData.videoUrl || '',
           fileUrl: editPostData.fileUrl || '',
-          // CRITICAL FIX: Preserves chronological order for restoration queries
           createdAt: editPostData.rawCreatedAt || serverTimestamp(),
           updatedAt: serverTimestamp()
         }
       });
 
-      // 2. Erase row document cleanly from active collection
       await deleteDoc(doc(db, "company_news", editPostData.id));
       
       if (triggerToast) triggerToast("success", "Moved to Trash Bin. Recoverable within 30 days.");
@@ -145,6 +186,9 @@ const NewPostModal = ({ isOpen, onClose, editPostData = null, triggerToast }) =>
     setFormData(prev => ({ ...prev, [fieldMap[slot]]: '' }));
   };
 
+  // Logic to determine if the manual status dropdown should be locked
+  const isDateExpired = formData.endDate && new Date(formData.endDate).setHours(0,0,0,0) < new Date().setHours(0,0,0,0);
+
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[9999] p-4 animate-in fade-in duration-200">
       <div className="bg-white rounded-[2.5rem] w-full max-w-xl p-8 relative shadow-2xl border border-gray-50 flex flex-col max-h-[85vh] overflow-y-auto" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
@@ -160,7 +204,12 @@ const NewPostModal = ({ isOpen, onClose, editPostData = null, triggerToast }) =>
             </div>
             <div>
               <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1.5">Status</label>
-              <select value={formData.status} onChange={(e) => setFormData({ ...formData, status: e.target.value })} className="w-full bg-gray-50 border border-gray-100 rounded-xl px-3 py-3 text-xs font-bold text-gray-700 outline-none focus:border-[#F9A825] cursor-pointer">
+              <select 
+                value={formData.status} 
+                onChange={(e) => setFormData({ ...formData, status: e.target.value })} 
+                disabled={isDateExpired} // Locks the dropdown if the date has forced it to expire
+                className={`w-full bg-gray-50 border border-gray-100 rounded-xl px-3 py-3 text-xs font-bold outline-none focus:border-[#F9A825] transition-colors ${isDateExpired ? 'text-rose-500 cursor-not-allowed bg-rose-50/50' : 'text-gray-700 cursor-pointer'}`}
+              >
                 <option value="Active">Active</option>
                 <option value="Expired">Expired</option>
               </select>
@@ -277,8 +326,8 @@ const NewPostModal = ({ isOpen, onClose, editPostData = null, triggerToast }) =>
         <div className="absolute inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center z-[99999] p-4 animate-in fade-in duration-150">
           <div className="bg-white rounded-[2rem] w-full max-w-sm p-6 text-center shadow-2xl border border-gray-50 animate-in zoom-in-95 duration-150">
             <div className="w-12 h-12 bg-rose-50 text-rose-600 rounded-2xl flex items-center justify-center mx-auto mb-4"><AlertTriangle size={24} /></div>
-            <h3 className="text-base font-black text-gray-800 tracking-tight">Confirm Permanent Deletion</h3>
-            <p className="text-xs text-gray-400 font-medium mt-2 leading-relaxed">Are you sure you want to completely remove this announcement? It will be moved to the Trash Bin.</p>
+            <h3 className="text-base font-black text-gray-800 tracking-tight">Move to Trash Bin</h3>
+            <p className="text-xs text-gray-400 font-medium mt-2 leading-relaxed">Are you sure you want to completely remove this announcement? It will be moved to the Trash Bin and can be restored within 30 days.</p>
             <div className="grid grid-cols-2 gap-3 mt-5">
               <button type="button" onClick={() => setShowDeleteConfirm(false)} className="bg-gray-100 hover:bg-gray-200 text-gray-600 text-xs font-bold py-3 rounded-xl border-0 outline-none transition-colors cursor-pointer">Cancel</button>
               <button type="button" onClick={handleConfirmDelete} className="bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold py-3 rounded-xl border-0 outline-none transition-colors shadow-sm cursor-pointer">Delete Now</button>
