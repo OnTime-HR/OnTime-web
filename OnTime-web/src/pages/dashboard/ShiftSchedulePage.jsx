@@ -7,7 +7,7 @@ import { collection, getDocs, addDoc, doc, updateDoc, deleteDoc, query, where } 
 const ShiftSchedulePage = () => {
   const [shiftsList, setShiftsList] = useState([]);
   const [managersList, setManagersList] = useState([]);
-  const [officesList, setOfficesList] = useState([]); // NEW: Stores operational locations
+  const [officesList, setOfficesList] = useState([]);
   const [loading, setLoading] = useState(true);
 
   // --- ATTENDANCE STATE ---
@@ -23,7 +23,8 @@ const ShiftSchedulePage = () => {
   // --- MANAGER ALLOCATION MODAL STATES ---
   const [isManagerModalOpen, setIsManagerModalOpen] = useState(false);
   const [activeShiftForManagers, setActiveShiftForManagers] = useState(null);
-  // Now stores objects: [{ id: "managerId", locationId: "officeId" }]
+  
+  // Now stores objects: [{ id: "managerId", locationId: "officeId", startDate: "YYYY-MM-DD", endDate: "YYYY-MM-DD" }]
   const [tempAssignedManagers, setTempAssignedManagers] = useState([]); 
   
   const [shiftForm, setShiftForm] = useState({
@@ -47,7 +48,6 @@ const ShiftSchedulePage = () => {
   const fetchData = async () => {
     setLoading(true);
     try {
-      // 1. Fetch Shifts
       const shiftsSnapshot = await getDocs(collection(db, "shifts"));
       const shiftsData = shiftsSnapshot.docs.map(doc => ({
         id: doc.id,
@@ -55,7 +55,6 @@ const ShiftSchedulePage = () => {
       }));
       setShiftsList(shiftsData);
 
-      // 2. Fetch Managers
       const managersQuery = query(collection(db, "users"), where("role", "==", "Manager"));
       const managersSnapshot = await getDocs(managersQuery);
       const managersData = managersSnapshot.docs.map(doc => ({
@@ -64,7 +63,6 @@ const ShiftSchedulePage = () => {
       }));
       setManagersList(managersData);
 
-      // 3. Fetch Locations (Offices)
       const officesSnapshot = await getDocs(collection(db, "offices"));
       const officesData = officesSnapshot.docs.map(doc => ({
         id: doc.id,
@@ -137,32 +135,37 @@ const ShiftSchedulePage = () => {
   const handleOpenManagerModal = (shift) => {
     setActiveShiftForManagers(shift);
     
-    // Normalize data (safeguard in case older shifts just had string arrays)
+    // Normalize data (safeguard for older shifts)
     const currentManagers = shift.assignedManagers || [];
     const normalized = currentManagers.map(m => 
-      typeof m === 'string' ? { id: m, locationId: '' } : m
+      typeof m === 'string' ? { id: m, locationId: '', startDate: '', endDate: '' } : { startDate: '', endDate: '', ...m }
     );
     
     setTempAssignedManagers(normalized);
     setIsManagerModalOpen(true);
   };
 
-  // UPDATED: Handles adding/removing objects instead of just IDs
   const toggleManagerSelection = (managerId) => {
     setTempAssignedManagers(prev => {
       const exists = prev.find(m => m.id === managerId);
       if (exists) {
         return prev.filter(m => m.id !== managerId); // Remove if unchecked
       } else {
-        return [...prev, { id: managerId, locationId: '' }]; // Add with empty location if checked
+        return [...prev, { id: managerId, locationId: '', startDate: '', endDate: '' }]; // Add with empty fields
       }
     });
   };
 
-  // NEW: Updates the specific location for a checked manager
   const handleManagerLocationChange = (managerId, locationId) => {
     setTempAssignedManagers(prev => 
       prev.map(m => m.id === managerId ? { ...m, locationId } : m)
+    );
+  };
+
+  // NEW: Handles start and end date updates for specific managers
+  const handleManagerDateChange = (managerId, field, value) => {
+    setTempAssignedManagers(prev => 
+      prev.map(m => m.id === managerId ? { ...m, [field]: value } : m)
     );
   };
 
@@ -200,10 +203,10 @@ const ShiftSchedulePage = () => {
   const handleSaveManagers = async () => {
     if (!activeShiftForManagers) return;
     
-    // Validation: Ensure all selected managers have a location assigned
-    const missingLocation = tempAssignedManagers.some(m => !m.locationId);
-    if (missingLocation) {
-      alert("Please select an operational location for all checked managers.");
+    // Validation: Ensure all selected managers have a location and dates assigned
+    const missingData = tempAssignedManagers.some(m => !m.locationId || !m.startDate || !m.endDate);
+    if (missingData) {
+      alert("Please ensure a location, start date, and end date are provided for all checked managers.");
       return;
     }
 
@@ -425,7 +428,7 @@ const ShiftSchedulePage = () => {
         </div>
       )}
 
-      {/* --- ALLOCATE MANAGERS MODAL (UPDATED WITH LOCATIONS) --- */}
+      {/* --- ALLOCATE MANAGERS MODAL (UPDATED WITH DATES) --- */}
       {isManagerModalOpen && activeShiftForManagers && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[5000] flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[80vh]">
@@ -469,23 +472,53 @@ const ShiftSchedulePage = () => {
                           <span className={`text-sm font-semibold line-clamp-1 ${isSelected ? 'text-amber-900' : 'text-gray-700'}`}>{manager.name}</span>
                         </label>
                         
-                        {/* Location Dropdown appearing when selected */}
+                        {/* Dynamic Settings appearing when selected */}
                         {isSelected && (
-                          <div className="pl-7 pr-2">
-                            <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1 flex items-center gap-1">
-                              <MapPin size={10} /> Assign Operational Location
-                            </label>
-                            <select
-                              value={assignedData.locationId || ''}
-                              onChange={(e) => handleManagerLocationChange(manager.id, e.target.value)}
-                              className="w-full text-xs p-2.5 border border-amber-200 rounded-lg bg-white text-gray-700 focus:outline-none focus:border-[#F9A825] focus:ring-1 focus:ring-[#F9A825]"
-                              required
-                            >
-                              <option value="" disabled>Select a location...</option>
-                              {officesList.map(office => (
-                                <option key={office.id} value={office.id}>{office.name}</option>
-                              ))}
-                            </select>
+                          <div className="pl-7 pr-2 flex flex-col gap-3">
+                            <div>
+                              <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1 flex items-center gap-1">
+                                <MapPin size={10} /> Assign Operational Location
+                              </label>
+                              <select
+                                value={assignedData.locationId || ''}
+                                onChange={(e) => handleManagerLocationChange(manager.id, e.target.value)}
+                                className="w-full text-xs p-2.5 border border-amber-200 rounded-lg bg-white text-gray-700 focus:outline-none focus:border-[#F9A825] focus:ring-1 focus:ring-[#F9A825]"
+                                required
+                              >
+                                <option value="" disabled>Select a location...</option>
+                                {officesList.map(office => (
+                                  <option key={office.id} value={office.id}>{office.name}</option>
+                                ))}
+                              </select>
+                            </div>
+
+                            {/* NEW: Date Range Selection */}
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">
+                                  Start Date
+                                </label>
+                                <input
+                                  type="date"
+                                  value={assignedData.startDate || ''}
+                                  onChange={(e) => handleManagerDateChange(manager.id, 'startDate', e.target.value)}
+                                  className="w-full text-xs p-2.5 border border-amber-200 rounded-lg bg-white text-gray-700 focus:outline-none focus:border-[#F9A825] focus:ring-1 focus:ring-[#F9A825] cursor-pointer"
+                                  required
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">
+                                  End Date
+                                </label>
+                                <input
+                                  type="date"
+                                  value={assignedData.endDate || ''}
+                                  onChange={(e) => handleManagerDateChange(manager.id, 'endDate', e.target.value)}
+                                  className="w-full text-xs p-2.5 border border-amber-200 rounded-lg bg-white text-gray-700 focus:outline-none focus:border-[#F9A825] focus:ring-1 focus:ring-[#F9A825] cursor-pointer"
+                                  required
+                                />
+                              </div>
+                            </div>
                           </div>
                         )}
                       </div>
