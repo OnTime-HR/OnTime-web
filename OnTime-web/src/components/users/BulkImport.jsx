@@ -1,184 +1,161 @@
-import React, { useRef, useState } from 'react';
-import { FileUp, Loader2 } from 'lucide-react';
-import { bulkImportEmployees } from '../../services/employeeService';
-import toast from 'react-hot-toast';
+// src/components/users/BulkImport.jsx
+import React, { useState, useRef } from 'react';
+import { UploadCloud, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { db } from '../../services/firebase';
+import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 
 const BulkImport = () => {
+  const [isDragging, setIsDragging] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [result, setResult] = useState(null);
   const fileInputRef = useRef(null);
-  const [importing, setImporting] = useState(false);
-  const [isDragOver, setIsDragOver] = useState(false);
-
-  const handleBrowseFiles = () => {
-    fileInputRef.current?.click();
-  };
-
-  const handleFileChange = async (e) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      await processCSVFile(file);
-    }
-  };
 
   const handleDragOver = (e) => {
     e.preventDefault();
-    setIsDragOver(true);
+    setIsDragging(true);
   };
 
   const handleDragLeave = () => {
-    setIsDragOver(false);
+    setIsDragging(false);
   };
 
-  const handleDrop = async (e) => {
+  const handleDrop = (e) => {
     e.preventDefault();
-    setIsDragOver(false);
-    
-    const file = e.dataTransfer.files?.[0];
-    if (file) {
-      if (file.name.endsWith('.csv') || file.type === 'text/csv') {
-        await processCSVFile(file);
-      } else {
-        toast.error('Only CSV files are supported!');
-      }
+    setIsDragging(false);
+    const files = e.dataTransfer.files;
+    if (files.length > 0) processCSV(files[0]);
+  };
+
+  const handleFileSelect = (e) => {
+    if (e.target.files.length > 0) {
+      processCSV(e.target.files[0]);
     }
   };
 
-  const processCSVFile = async (file) => {
-    setImporting(true);
-    const loadingToast = toast.loading('Reading and parsing CSV...');
+  const processCSV = (file) => {
+    if (file.type !== "text/csv" && !file.name.endsWith('.csv')) {
+      setResult({ type: 'error', text: 'Please upload a valid CSV file.' });
+      return;
+    }
+
+    setIsUploading(true);
+    setResult(null);
 
     const reader = new FileReader();
-    reader.onload = async (e) => {
-      const text = e.target?.result;
-      if (typeof text !== 'string') {
-        toast.error('Failed to read CSV file content.', { id: loadingToast });
-        setImporting(false);
-        return;
-      }
-
+    reader.onload = async (event) => {
       try {
-        const employeesList = parseCSV(text);
-        if (employeesList.length === 0) {
-          toast.error('No valid employee records found in CSV.', { id: loadingToast });
-          setImporting(false);
-          return;
+        const text = event.target.result;
+        const rows = text.split('\n').map(row => row.trim()).filter(row => row);
+        
+        if (rows.length < 2) throw new Error("CSV is empty or missing data.");
+
+        // Parse headers to find indexes
+        const headers = rows[0].split(',').map(h => h.trim().toLowerCase());
+        const nameIdx = headers.indexOf('name');
+        const phoneIdx = headers.indexOf('phone');
+        const roleIdx = headers.indexOf('role');
+
+        if (nameIdx === -1 || phoneIdx === -1 || roleIdx === -1) {
+          throw new Error("CSV headers must be exactly: Name, Phone, Role");
         }
 
-        toast.loading(`Importing ${employeesList.length} employees...`, { id: loadingToast });
-        await bulkImportEmployees(employeesList);
-        toast.success(`Successfully imported ${employeesList.length} employees!`, { id: loadingToast });
-      } catch (err) {
-        toast.error('Failed to import employees: ' + err.message, { id: loadingToast });
+        let successCount = 0;
+
+        for (let i = 1; i < rows.length; i++) {
+          const cols = rows[i].split(',').map(c => c.trim());
+          if (cols.length < 3) continue; // Skip broken rows
+
+          const name = cols[nameIdx];
+          const phone = cols[phoneIdx];
+          const role = cols[roleIdx];
+
+          if (!phone) continue;
+
+          // Format phone to ensure it starts with '+'
+          const cleanPhone = phone.startsWith('+') ? phone : `+${phone}`;
+
+          // Construct the strict document object
+          const userData = {
+            name: name,
+            phone: cleanPhone,
+            role: role || 'Employee',
+            userType: (role || 'Employee').toLowerCase(),
+            company_code: "COM100", // Defaulting to your company code
+            invited: true,
+            dark_mode: false,
+            notifications_enabled: true,
+            status: "Pending",
+            createdAt: serverTimestamp()
+          };
+
+          // Save to Firebase using Phone as Document ID
+          await setDoc(doc(db, "pre_authorized_users", cleanPhone), userData);
+          successCount++;
+        }
+
+        setResult({ type: 'success', text: `Successfully imported ${successCount} users!` });
+      } catch (error) {
+        setResult({ type: 'error', text: error.message });
       } finally {
-        setImporting(false);
-        if (fileInputRef.current) {
-          fileInputRef.current.value = '';
-        }
+        setIsUploading(false);
+        if (fileInputRef.current) fileInputRef.current.value = '';
       }
     };
-
-    reader.onerror = () => {
-      toast.error('Error reading CSV file.', { id: loadingToast });
-      setImporting(false);
-    };
-
     reader.readAsText(file);
-  };
-
-  // Helper function to parse CSV safely
-  const parseCSV = (text) => {
-    const lines = text.split(/\r?\n/).map(line => line.trim());
-    if (lines.length < 2) return [];
-
-    // Parse headers to match columns
-    const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/['"]/g, ''));
-    
-    const nameIndex = headers.indexOf('name');
-    const emailIndex = headers.indexOf('email');
-    const phoneIndex = headers.indexOf('phone');
-    const roleIndex = headers.indexOf('role');
-    const statusIndex = headers.indexOf('status');
-
-    const employees = [];
-    
-    for (let i = 1; i < lines.length; i++) {
-      const line = lines[i];
-      if (!line) continue;
-
-      // Split line by comma, keeping quotes in mind if possible, or simple splitting
-      const columns = line.split(',').map(c => c.trim().replace(/['"]/g, ''));
-      if (columns.length === 0 || !columns[0]) continue;
-
-      let name = '';
-      let email = '';
-      let phone = '';
-      let role = 'Employee';
-      let status = 'Active';
-
-      // Resolve by detected headers, otherwise by index
-      if (nameIndex !== -1 && columns[nameIndex]) name = columns[nameIndex];
-      else if (columns[0]) name = columns[0];
-
-      if (emailIndex !== -1 && columns[emailIndex]) email = columns[emailIndex];
-      else if (columns[1]) email = columns[1];
-
-      if (phoneIndex !== -1 && columns[phoneIndex]) phone = columns[phoneIndex];
-      else if (columns[2]) phone = columns[2];
-
-      if (roleIndex !== -1 && columns[roleIndex]) role = columns[roleIndex];
-      else if (columns[3]) role = columns[3];
-
-      if (statusIndex !== -1 && columns[statusIndex]) status = columns[statusIndex];
-      else if (columns[4]) status = columns[4];
-
-      // Validate basic email format to skip headers or invalid rows
-      if (email && email.includes('@')) {
-        employees.push({ name, email, phone, role, status });
-      }
-    }
-
-    return employees;
   };
 
   return (
     <div 
+      className={`rounded-2xl transition-all p-8 flex flex-col items-center justify-center text-center h-full min-h-[280px] ${
+        isDragging 
+          ? 'border-2 border-dashed border-[#F9A825] bg-amber-50/50' 
+          : 'bg-white border border-gray-100 shadow-sm hover:border-gray-200'
+      }`}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      className={`bg-[#FFF8ED] rounded-2xl p-8 flex flex-col items-center justify-center border-2 border-dashed text-center transition-all min-h-[220px] ${
-        isDragOver ? 'border-[#F9A825] bg-[#FFF2DE]' : 'border-[#F9E8D2]'
-      }`}
     >
       <input 
         type="file" 
-        ref={fileInputRef} 
-        onChange={handleFileChange}
-        accept=".csv"
+        accept=".csv" 
         className="hidden" 
+        ref={fileInputRef} 
+        onChange={handleFileSelect} 
       />
 
-      <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center mb-4 shadow-sm border border-dashed border-[#F9A825]">
-        {importing ? (
-          <Loader2 className="text-[#F9A825] animate-spin" size={24} />
-        ) : (
-          <FileUp className="text-[#F9A825]" size={24} />
-        )}
-      </div>
-      
-      <h3 className="text-xl font-bold text-gray-900 mb-2">Bulk Import Employees</h3>
-      
-      <p className="text-gray-500 text-sm max-w-sm mb-4">
-        {importing 
-          ? 'Processing your employee file, please wait...' 
-          : 'Drag and drop your CSV file here to add multiple users at once.'}
-      </p>
-      
-      <button 
-        onClick={handleBrowseFiles}
-        disabled={importing}
-        className="text-[#F9A825] font-bold hover:underline transition-all cursor-pointer disabled:opacity-50 disabled:hover:no-underline"
-      >
-        Browse Files
-      </button>
+      {isUploading ? (
+        <div className="flex flex-col items-center">
+          <Loader2 size={40} className="text-[#F9A825] animate-spin mb-4" />
+          <h3 className="text-lg font-bold text-gray-800">Processing Data...</h3>
+          <p className="text-xs text-gray-500 mt-2">Writing users to secure database.</p>
+        </div>
+      ) : (
+        <>
+          <div className="w-16 h-16 bg-amber-50 rounded-2xl flex items-center justify-center text-[#F9A825] mb-4">
+            <UploadCloud size={32} />
+          </div>
+          <h3 className="text-lg font-bold text-gray-800">Bulk Import Employees</h3>
+          <p className="text-xs text-gray-500 mt-2 max-w-[250px] mb-6">
+            Drag and drop your CSV file here to instantly add multiple users to the system.
+          </p>
+          
+          <button 
+            onClick={() => fileInputRef.current.click()}
+            className="px-6 py-2.5 bg-gray-50 text-gray-700 hover:bg-gray-100 font-bold text-sm rounded-xl transition-colors outline-none cursor-pointer"
+          >
+            Browse Files
+          </button>
+
+          {result && (
+            <div className={`mt-5 flex items-center gap-2 text-xs font-bold px-4 py-2 rounded-lg ${
+              result.type === 'success' ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'
+            }`}>
+              {result.type === 'success' ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
+              {result.text}
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 };
