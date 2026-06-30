@@ -1,10 +1,9 @@
 // src/pages/users/ApprovalsPage.jsx
 import React, { useState, useEffect } from 'react';
-import { Hourglass, CheckCircle, DollarSign, Download, FileText, FileSpreadsheet, History, Search, Trash2, AlertTriangle, X } from 'lucide-react';
-import { updateRequestStatus } from '../../services/approvalService';
+import { Hourglass, CheckCircle, DollarSign, Download, FileText, FileSpreadsheet, History, Search, Trash2, AlertTriangle, X, Paperclip, ExternalLink } from 'lucide-react';
 import { generateAndArchiveReport, downloadArchivedFile, deleteArchivedRecord } from '../../services/reportService';
 import { db } from '../../services/firebase';
-import { collection, query, onSnapshot, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, query, onSnapshot, addDoc, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 
 const ApprovalsPage = () => {
   const [activeTab, setActiveTab] = useState('All Requests');
@@ -27,41 +26,116 @@ const ApprovalsPage = () => {
   const [metrics, setMetrics] = useState({ pendingCount: 0, approvalsThisMonth: 0, totalClaimsValue: 0 });
 
   useEffect(() => {
-    const requestsRef = collection(db, "leave_requests");
-    const unsubscribeRequests = onSnapshot(requestsRef, (snapshot) => {
+    let leaves = [];
+    let claims = [];
+
+    // Helper function to combine data from multiple collections and update state/metrics
+    const updateRequestsAndMetrics = () => {
       const currentMonth = new Date().getMonth();
       const currentYear = new Date().getFullYear();
       let pending = 0; let approvedThisMonth = 0; let totalValue = 0;
 
-      const formatted = snapshot.docs.map(docSnap => {
-        const item = docSnap.data();
-        const appliedDate = item.appliedAt?.toDate() || new Date();
-        
-        if (item.status === 'Pending') pending++;
-        if (item.status === 'Approved' && appliedDate.getMonth() === currentMonth && appliedDate.getFullYear() === currentYear) approvedThisMonth++;
-        if (item.status === 'Approved') totalValue += Number(item.claimAmount || item.amount || (item.totalDays * 150) || 0);
+      // Merge and sort newest first
+      const combined = [...leaves, ...claims].sort((a, b) => b.rawDate - a.rawDate);
 
-        return {
-          id: docSnap.id, employeeId: item.userId || '', employeeName: item.userName || 'Unknown Staff', role: item.userRole || 'Employee',
-          type: item.leaveType || 'Leave', dateRequested: appliedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-          duration: item.totalDays || 1, status: item.status || 'Pending', reason: item.reason || 'No additional details provided by the employee.',
-          reviewedBy: item.reviewedBy || null, actionReason: item.actionReason || item.rejectionReason || null, decisionHistory: item.decisionHistory || [] 
-        };
+      combined.forEach(req => {
+        if (req.status === 'Pending') pending++;
+        if (req.status === 'Approved' && req.rawDate.getMonth() === currentMonth && req.rawDate.getFullYear() === currentYear) approvedThisMonth++;
+        if (req.status === 'Approved') totalValue += req.numericValue;
       });
 
       setMetrics({ pendingCount: pending, approvalsThisMonth: approvedThisMonth, totalClaimsValue: totalValue });
-      setAllRequests(formatted);
+      setAllRequests(combined);
+    };
+
+    // 1. Listen to Leave Requests
+    const unsubscribeLeaves = onSnapshot(collection(db, "leave_requests"), (snapshot) => {
+      leaves = snapshot.docs.map(docSnap => {
+        const item = docSnap.data();
+        let appliedDate = new Date();
+        if (item.appliedAt?.toDate) appliedDate = item.appliedAt.toDate();
+        else if (item.createdAt?.toDate) appliedDate = item.createdAt.toDate();
+
+        const numericVal = item.totalDays ? item.totalDays * 150 : 0; 
+        
+        return {
+          id: docSnap.id, 
+          employeeId: item.userId || '', 
+          employeeName: item.userName || item.employeeName || 'Unknown Staff', 
+          role: item.userRole || 'Employee',
+          type: 'Leave', 
+          subType: item.leaveType || 'General Leave',
+          dateRequested: appliedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+          rawDate: appliedDate,
+          duration: item.totalDays || 1,
+          durationText: `${item.totalDays || 1} Day(s)`,
+          numericValue: numericVal,
+          status: item.status || 'Pending', 
+          reason: item.reason || 'No additional details provided by the employee.',
+          receiptUrl: null,
+          reviewedBy: item.reviewedBy || null, 
+          actionReason: item.actionReason || item.rejectionReason || null, 
+          decisionHistory: item.decisionHistory || [],
+          sourceCollection: 'leave_requests'
+        };
+      });
+      updateRequestsAndMetrics();
     });
 
+    // 2. Listen to Medical Claims (UPDATED FIELDS)
+    const unsubscribeClaims = onSnapshot(collection(db, "medical_claims"), (snapshot) => {
+      claims = snapshot.docs.map(docSnap => {
+        const item = docSnap.data();
+        
+        // Handle Firebase String timestamps or native Timestamps for submittedAt
+        let appliedDate = new Date();
+        if (item.submittedAt?.toDate) {
+          appliedDate = item.submittedAt.toDate();
+        } else if (typeof item.submittedAt === 'string') {
+          appliedDate = new Date(item.submittedAt.replace(' at ', ' '));
+        }
+
+        const numericVal = Number(item.amount || item.claimAmount || 0);
+
+        return {
+          id: docSnap.id, 
+          employeeId: item.userId || '', 
+          employeeName: item.userName || 'Unknown Staff', 
+          role: item.userRole || 'Employee',
+          type: 'Medical', // Forces exact match for the 'Medical' tab filter
+          subType: item.claimType || 'General Medical',
+          dateRequested: appliedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+          rawDate: appliedDate,
+          duration: numericVal, 
+          durationText: `$${numericVal.toLocaleString('en-US', { minimumFractionDigits: 2 })}`,
+          numericValue: numericVal,
+          status: item.status || 'Pending', 
+          reason: item.description || 'No description provided.',
+          receiptUrl: item.receiptUrl || null, // Capture the receipt URL
+          reviewedBy: item.reviewedBy || item.approverId || null, 
+          actionReason: item.actionReason || item.rejectionReason || null, 
+          decisionHistory: item.decisionHistory || [],
+          sourceCollection: 'medical_claims'
+        };
+      });
+      updateRequestsAndMetrics();
+    });
+
+    // 3. Listen to Report Archives
     const archiveQuery = query(collection(db, "reports_archive"));
     const unsubscribeArchive = onSnapshot(archiveQuery, (snapshot) => {
       const logs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data(), dateFormatted: doc.data().downloadedAt?.toDate().toLocaleString() || 'Just Now' }));
       setArchiveLogs(logs.sort((a, b) => (b.downloadedAt?.toDate() || new Date(0)) - (a.downloadedAt?.toDate() || new Date(0))));
     });
 
-    return () => { unsubscribeRequests(); unsubscribeArchive(); };
+    return () => { 
+      unsubscribeLeaves(); 
+      unsubscribeClaims(); 
+      unsubscribeArchive(); 
+    };
   }, []);
 
+  // --- FILTERING ---
   const currentViewRequests = allRequests.filter(req => req.status === requestStatusView);
   const filteredRequests = currentViewRequests.filter(req => {
     if (activeTab === 'All Requests') return true;
@@ -72,6 +146,7 @@ const ApprovalsPage = () => {
 
   const filteredArchiveLogs = archiveLogs.filter(log => log.fileUrl?.toLowerCase().includes(searchQuery.toLowerCase()) || log.reportName?.toLowerCase().includes(searchQuery.toLowerCase()) || log.format?.toLowerCase().includes(searchQuery.toLowerCase()));
 
+  // --- ACTIONS ---
   const handleCompileReport = async () => {
     setCompiling(true);
     try { await generateAndArchiveReport(selectedReport, exportFormat); } 
@@ -82,25 +157,22 @@ const ApprovalsPage = () => {
   const openConfirmDelete = (logId) => setDeleteModal({ isOpen: true, logId: logId });
   const closeConfirmDelete = () => setDeleteModal({ isOpen: false, logId: null });
   
-  // SOFT DELETE ENGINE FOR REPORTS
   const handleArchiveDeleteExecute = async () => {
     if (!deleteModal.logId) return;
     try { 
       const targetLog = archiveLogs.find(log => log.id === deleteModal.logId);
       if (targetLog) {
-        // Staged to Trash Bin with metadata mappings
         await addDoc(collection(db, "trash_bin"), {
           originalCollection: "reports_archive",
           originalId: targetLog.id,
           deletedAt: serverTimestamp(),
           itemMemoryData: {
             ...targetLog,
-            createdAt: targetLog.createdAt || serverTimestamp(), // Re-index timeline mapping
+            createdAt: targetLog.createdAt || serverTimestamp(),
             updatedAt: serverTimestamp()
           }
         });
       }
-      // Triggers hard delete inside archive scope
       await deleteArchivedRecord(deleteModal.logId); 
       closeConfirmDelete(); 
     } 
@@ -111,13 +183,34 @@ const ApprovalsPage = () => {
   const closeDetailsModal = () => { setSelectedRequest(null); setTimeout(() => setModalStep('details'), 200); };
   const proceedWithAction = () => { if ((modalStep === 'reason_input') && !actionReason.trim()) { alert("Please provide a reason for this decision."); return; } setModalStep('confirm'); };
 
+  // DIRECT FIRESTORE UPDATE ENGINE
   const executeFinalDecision = async () => {
     setLoadingId(selectedRequest.id);
     try {
-      await updateRequestStatus(selectedRequest.id, selectedRequest.employeeId, selectedRequest.type, selectedRequest.duration, pendingDecision, actionReason, selectedRequest.status);
+      const docRef = doc(db, selectedRequest.sourceCollection, selectedRequest.id);
+      
+      const newHistoryLog = {
+        action: pendingDecision,
+        reason: actionReason || "No reason provided",
+        reviewer: "Admin Panel", 
+        timestamp: new Date().toISOString()
+      };
+
+      // Ensure we hit the correct collection (leave_requests OR medical_claims)
+      await updateDoc(docRef, {
+        status: pendingDecision,
+        reviewedBy: "Admin Panel",
+        actionReason: actionReason || "No reason provided",
+        decisionHistory: [...(selectedRequest.decisionHistory || []), newHistoryLog],
+        updatedAt: serverTimestamp()
+      });
+
       closeDetailsModal();
-    } catch (error) { alert("Error processing transaction request: " + error.message); } 
-    finally { setLoadingId(null); }
+    } catch (error) { 
+      alert("Error processing transaction request: " + error.message); 
+    } finally { 
+      setLoadingId(null); 
+    }
   };
 
   return (
@@ -148,7 +241,7 @@ const ApprovalsPage = () => {
             </div>
           </div>
           <div className="flex bg-gray-100/70 p-1 rounded-xl border border-gray-200/50">
-            {['All Requests', 'Leave', 'Medical', 'Expense'].map((tab) => (
+            {['All Requests', 'Leave', 'Medical'].map((tab) => (
               <button key={tab} onClick={() => setActiveTab(tab)} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${activeTab === tab ? 'bg-white text-gray-800 shadow-sm border border-gray-200/50' : 'text-gray-500 hover:text-gray-700'}`}>{tab}</button>
             ))}
           </div>
@@ -158,7 +251,7 @@ const ApprovalsPage = () => {
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="border-b border-gray-100 text-[11px] font-bold text-gray-400 bg-gray-50/50 uppercase">
-                <th className="p-4 pl-6">Employee</th><th className="p-4">Type</th><th className="p-4">Date Requested</th><th className="p-4 pr-6">Duration</th>
+                <th className="p-4 pl-6">Employee</th><th className="p-4">Type</th><th className="p-4">Date Requested</th><th className="p-4 pr-6">Duration / Amount</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 text-sm">
@@ -168,8 +261,9 @@ const ApprovalsPage = () => {
                     <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs ${requestStatusView === 'Approved' ? 'bg-green-100 text-green-600' : requestStatusView === 'Rejected' ? 'bg-red-100 text-red-600' : 'bg-orange-100 text-[#F9A825]'}`}>{req.employeeName.charAt(0)}</div>
                     <div><h4 className="font-bold text-gray-800 leading-tight group-hover:text-[#F9A825] transition-colors">{req.employeeName}</h4><p className="text-gray-400 text-[11px] font-medium">{req.role}</p></div>
                   </td>
-                  <td className="p-4"><span className={`text-[11px] font-bold px-2.5 py-1 rounded-md uppercase ${req.type === 'Medical' ? 'bg-blue-50 text-blue-600' : 'bg-purple-50 text-purple-600'}`}>{req.type}</span></td>
-                  <td className="p-4 text-gray-500">{req.dateRequested}</td><td className="p-4 pr-6 text-gray-700 font-semibold">{req.duration} Day(s)</td>
+                  <td className="p-4"><span className={`text-[11px] font-bold px-2.5 py-1 rounded-md uppercase ${req.type === 'Medical' ? 'bg-blue-50 text-blue-600 border border-blue-100' : 'bg-purple-50 text-purple-600 border border-purple-100'}`}>{req.type}</span></td>
+                  <td className="p-4 text-gray-500">{req.dateRequested}</td>
+                  <td className="p-4 pr-6 text-gray-700 font-semibold">{req.durationText}</td>
                 </tr>
               ))}
             </tbody>
@@ -243,7 +337,7 @@ const ApprovalsPage = () => {
       )}
 
       {selectedRequest && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 transition-opacity">
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[9999] flex items-center justify-center p-4 transition-opacity">
           <div className="bg-white rounded-[2rem] border border-gray-100 shadow-2xl max-w-md w-full p-6 animate-in fade-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto custom-scrollbar">
             
             <div className="flex justify-between items-start mb-6">
@@ -253,13 +347,23 @@ const ApprovalsPage = () => {
 
             {modalStep === 'details' && (
               <>
-                <div className="bg-gray-50 rounded-xl p-4 mb-6 space-y-4">
+                <div className="bg-gray-50 rounded-xl p-4 mb-6 space-y-4 border border-gray-100">
                   <div className="flex justify-between border-b border-gray-200 pb-3"><span className="text-xs text-gray-500 font-semibold uppercase">Applicant</span><span className="text-sm font-bold text-gray-900">{selectedRequest.employeeName}</span></div>
                   <div className="flex justify-between border-b border-gray-200 pb-3"><span className="text-xs text-gray-500 font-semibold uppercase">Type</span><span className="text-sm font-bold text-[#F9A825]">{selectedRequest.type}</span></div>
-                  <div className="flex justify-between border-b border-gray-200 pb-3"><span className="text-xs text-gray-500 font-semibold uppercase">Duration</span><span className="text-sm font-bold text-gray-900">{selectedRequest.duration} Day(s)</span></div>
+                  <div className="flex justify-between border-b border-gray-200 pb-3"><span className="text-xs text-gray-500 font-semibold uppercase">Specifics</span><span className="text-sm font-bold text-gray-900">{selectedRequest.subType}</span></div>
+                  <div className="flex justify-between border-b border-gray-200 pb-3"><span className="text-xs text-gray-500 font-semibold uppercase">{selectedRequest.type === 'Medical' ? 'Claim Amount' : 'Duration'}</span><span className="text-sm font-bold text-gray-900">{selectedRequest.durationText}</span></div>
                   <div className={`flex justify-between ${selectedRequest.status !== 'Pending' && selectedRequest.reviewedBy ? 'border-b border-gray-200 pb-3' : ''}`}><span className="text-xs text-gray-500 font-semibold uppercase">Date Requested</span><span className="text-sm font-bold text-gray-900">{selectedRequest.dateRequested}</span></div>
                   {selectedRequest.status !== 'Pending' && selectedRequest.reviewedBy && (<div className="flex justify-between"><span className="text-xs text-gray-500 font-semibold uppercase">Reviewed By</span><span className="text-sm font-bold text-gray-900">{selectedRequest.reviewedBy}</span></div>)}
                 </div>
+
+                {selectedRequest.type === 'Medical' && selectedRequest.receiptUrl && (
+                  <div className="mb-6">
+                    <h4 className="text-xs text-gray-500 font-semibold uppercase mb-2">Attached Documentation</h4>
+                    <a href={selectedRequest.receiptUrl} target="_blank" rel="noreferrer" className="flex items-center justify-center gap-2 w-full py-3 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-xl text-sm font-bold transition-colors border border-blue-100">
+                      <Paperclip size={16} /> View Uploaded Receipt <ExternalLink size={14} />
+                    </a>
+                  </div>
+                )}
 
                 <div className="mb-6"><h4 className="text-xs text-gray-500 font-semibold uppercase mb-2">Employee Reason / Notes</h4><p className="text-sm text-gray-700 bg-white border border-gray-200 rounded-xl p-3 leading-relaxed">{selectedRequest.reason}</p></div>
 
