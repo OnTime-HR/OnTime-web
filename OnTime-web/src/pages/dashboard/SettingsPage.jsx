@@ -1,44 +1,47 @@
 // src/pages/dashboard/SettingsPage.jsx
 import React, { useState, useEffect } from 'react';
 import { db, auth } from '../../services/firebase';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { updateEmail, updateProfile, updatePassword } from 'firebase/auth';
-import { Clock, Shield, Sliders, User, RefreshCw, Save, X, KeyRound, Globe, Landmark } from 'lucide-react';
-import { updateAdminProfileData } from '../../services/adminService';
+import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { Shield, Sliders, User, RefreshCw, Save, X, KeyRound, Globe, Landmark, UploadCloud, AlertTriangle, LifeBuoy, FileText, Smartphone, Eye, EyeOff, Lock } from 'lucide-react';
+import { updateAdminProfileData, reauthenticateAdmin } from '../../services/adminService';
+import NotificationToast from '../../components/dashboard/NotificationToast';
 
 const SettingsPage = () => {
+  const CLOUD_NAME = "dfqeymqdx";
+  const UPLOAD_PRESET = "ontimeweb";
+
   const [activeTab, setActiveTab] = useState('General');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [imageUploading, setImageUploading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
-  // Master backup state to handle 'Discard Changes' reverting seamlessly
+  // Modals
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [authPasswordInput, setAuthPasswordInput] = useState('');
+
+  // Secure View Password States
+  const [showViewPasswordModal, setShowViewPasswordModal] = useState(false);
+  const [viewPasswordInput, setViewPasswordInput] = useState('');
+  const [verifyingView, setVerifyingView] = useState(false);
+
+  const [showPinResetModal, setShowPinResetModal] = useState(false);
+  const [toast, setToast] = useState({ isOpen: false, type: 'success', message: '' });
+
   const [originalSettings, setOriginalSettings] = useState(null);
 
-  // FORM STATES
   const [settings, setSettings] = useState({
-    // Tab 1: General (Geofencing & System Limits)
-    radius: 150,
     companyCode: "ONTIME-HQ-2026",
     annualLeaveQuota: 21,
     claimCurrency: "LKR",
-
-    // Tab 2: Attendance Policies
-    workStart: "08:30",
-    workEnd: "17:30",
-    gracePeriod: 15,
-    earlyDepartureAllowance: 10,
-
-    // Tab 3: Advanced Security
-    forcePinReset: false,
-
-    // Tab 4: Admin Profile parameters
     adminName: "",
     adminEmail: "",
-    adminPassword: ""
+    adminPassword: "",
+    adminAvatar: ""
   });
 
-  // 1. Fetch live settings profile from Firestore on mount
+  const showToast = (type, message) => setToast({ isOpen: true, type, message });
+
   useEffect(() => {
     const fetchGlobalConfigurations = async () => {
       try {
@@ -46,27 +49,31 @@ const SettingsPage = () => {
         const docSnap = await getDoc(docRef);
 
         let fetchedData = {};
-        if (docSnap.exists()) {
-          fetchedData = docSnap.data();
+        if (docSnap.exists()) fetchedData = docSnap.data();
+
+        let currentAdminName = auth.currentUser?.displayName;
+        let currentAdminAvatar = auth.currentUser?.photoURL;
+        
+        if (auth.currentUser) {
+          const adminDocSnap = await getDoc(doc(db, "admin", auth.currentUser.uid));
+          if (adminDocSnap.exists()) {
+            currentAdminName = adminDocSnap.data().name || currentAdminName;
+            currentAdminAvatar = adminDocSnap.data().photoUrl || currentAdminAvatar;
+          }
         }
 
         const initialFormState = {
-          radius: fetchedData.radius || 150,
           companyCode: fetchedData.companyCode || "ONTIME-HQ-2026",
           annualLeaveQuota: fetchedData.annualLeaveQuota || 21,
           claimCurrency: fetchedData.claimCurrency || "LKR",
-          workStart: fetchedData.workStart || "08:30",
-          workEnd: fetchedData.workEnd || "17:30",
-          gracePeriod: fetchedData.gracePeriod || 15,
-          earlyDepartureAllowance: fetchedData.earlyDepartureAllowance || 10,
-          forcePinReset: fetchedData.forcePinReset || false,
-          adminName: auth.currentUser?.displayName || "System Admin",
+          adminName: currentAdminName || "System Admin",
           adminEmail: auth.currentUser?.email || "",
-          adminPassword: "" // Kept empty for safety
+          adminPassword: "",
+          adminAvatar: currentAdminAvatar || ""
         };
 
         setSettings(initialFormState);
-        setOriginalSettings(JSON.parse(JSON.stringify(initialFormState))); // Deep copy backup
+        setOriginalSettings(JSON.parse(JSON.stringify(initialFormState)));
       } catch (err) {
         console.error("Failed to compile configurations:", err);
       } finally {
@@ -81,149 +88,197 @@ const SettingsPage = () => {
     setSettings(prev => ({ ...prev, [field]: value }));
   };
 
-  // 2. Action: Cycle authorization system key randomly
   const handleRegenerateCompanyCode = () => {
     const randomString = Math.random().toString(36).substring(2, 7).toUpperCase();
-    const generatedToken = `ONTIME-${randomString}-2026`;
-    handleInputChange('companyCode', generatedToken);
+    handleInputChange('companyCode', `ONTIME-${randomString}-2026`);
   };
 
-  // 3. Action: Revert changes back to original loaded configuration fields
   const handleDiscardChanges = () => {
     if (originalSettings) {
       setSettings(JSON.parse(JSON.stringify(originalSettings)));
-      alert("All local adjustments have been discarded successfully.");
+      setShowPassword(false);
+      showToast('success', "Local adjustments discarded.");
     }
   };
 
-  // 4. Action: Save updated states to Firestore & Firebase Auth profile
-  const handleSaveChanges = async (e) => {
+  // CLOUDINARY AVATAR UPLOAD
+  const handleAvatarUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    setImageUploading(true);
+    const dataToSend = new FormData();
+    dataToSend.append("file", file);
+    dataToSend.append("upload_preset", UPLOAD_PRESET);
+
+    try {
+      const response = await fetch(`https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`, {
+        method: "POST",
+        body: dataToSend
+      });
+      const parsedRes = await response.json();
+
+      if (parsedRes.secure_url) {
+        handleInputChange('adminAvatar', parsedRes.secure_url);
+        showToast('success', 'Profile image uploaded successfully.');
+      } else {
+        showToast('error', 'Image upload failed.');
+      }
+    } catch (err) {
+      showToast('error', err.message);
+    } finally {
+      setImageUploading(false);
+    }
+  };
+
+  const handlePasswordViewRequest = () => {
+    if (showPassword) {
+      setShowPassword(false);
+    } else {
+      setShowViewPasswordModal(true);
+      setViewPasswordInput('');
+    }
+  };
+
+  const handleVerifyToViewPassword = async () => {
+    if (!viewPasswordInput) return;
+    setVerifyingView(true);
+    try {
+      await reauthenticateAdmin(viewPasswordInput);
+      setShowPassword(true);
+      setShowViewPasswordModal(false);
+      setViewPasswordInput('');
+      showToast('success', 'Identity verified. Password visibility unlocked.');
+    } catch (error) {
+      setShowViewPasswordModal(false);
+      setViewPasswordInput('');
+      showToast('error', 'Verification failed: Incorrect current password.');
+    } finally {
+      setVerifyingView(false);
+    }
+  };
+
+  const executeGlobalPinReset = async () => {
+    setShowPinResetModal(false);
+    try {
+      await setDoc(doc(db, "system_settings", "global_config"), {
+        globalPinResetTriggeredAt: serverTimestamp()
+      }, { merge: true });
+      showToast('success', 'Global PIN Reset signal broadcasted to all mobile clients.');
+    } catch (error) {
+      showToast('error', 'Failed to broadcast PIN reset: ' + error.message);
+    }
+  };
+
+  const initiateSave = (e) => {
     e.preventDefault();
+    const isSensitiveChange = (settings.adminEmail !== auth.currentUser?.email) || (settings.adminPassword.length > 0);
+
+    if (activeTab === 'Profile' && isSensitiveChange) {
+      setShowAuthModal(true);
+    } else {
+      executeSave();
+    }
+  };
+
+  // Saves to both Global Config and Admin collection
+  const executeSave = async () => {
+    setShowAuthModal(false);
     setSaving(true);
 
     try {
-      // Step A: Save system policies to standard standalone document
-      const docRef = doc(db, "system_settings", "global_config");
-      await setDoc(docRef, {
-        // General Tab
-        radius: Number(settings.radius) || 150,
-        annualLeaveQuota: Number(settings.annualLeaveQuota) || 21,
-        claimCurrency: settings.claimCurrency || "LKR",
-        companyCode: settings.companyCode || "ONTIME-HQ-2026",
-
-        // Attendance Tab
-        workStart: settings.workStart || "08:30",
-        workEnd: settings.workEnd || "17:30",
-        gracePeriod: Number(settings.gracePeriod) || 0,
-        earlyDepartureAllowance: Number(settings.earlyDepartureAllowance) || 0,
-
-        // Security Tab
-        forcePinReset: Boolean(settings.forcePinReset),
-
-        updatedAt: new Date().toISOString(),
-        updatedBy: auth.currentUser?.uid || "unknown"
-      }, { merge: true });
-
-      // Step B: Update Admin Auth profile metrics if edited
+      // 1. Update Auth & Firestore via Service
       await updateAdminProfileData(
         settings.adminName,
         settings.adminEmail,
-        settings.adminPassword
+        settings.adminPassword,
+        authPasswordInput,
+        settings.adminAvatar
       );
 
-      // Clean out password state string locally so it doesn't stay visible in memory
-      setSettings(prev => ({ ...prev, adminPassword: "" }));
+      // 2. EXPLICITLY UPDATE THE ADMIN COLLECTION FOR THE SIDEBAR TO READ
+      if (auth.currentUser) {
+        const adminRef = doc(db, "admin", auth.currentUser.uid);
+        await setDoc(adminRef, {
+          name: settings.adminName,
+          photoUrl: settings.adminAvatar,
+          email: settings.adminEmail,
+          updatedAt: serverTimestamp()
+        }, { merge: true });
+      }
 
-      // Re-verify backup snapshot anchor for the Discard Changes engine
-      setOriginalSettings(JSON.parse(JSON.stringify({
-        ...settings,
-        adminPassword: ""
-      })));
-
-      alert("Global configurations successfully synchronized across all active nodes!");
     } catch (error) {
-      console.error("Configuration persistence failure:", error);
-      alert("Update Blocked: " + error.message);
+      if (error.code === 'auth/operation-not-allowed') {
+        showToast('error', "Auth restriction: Email change blocked by Firebase policy.");
+      } else {
+        showToast('error', error.message);
+        setSaving(false);
+        return; 
+      }
+    }
+
+    // 3. Update System Settings (Global Config)
+    try {
+      const docRef = doc(db, "system_settings", "global_config");
+      await setDoc(docRef, {
+        annualLeaveQuota: Number(settings.annualLeaveQuota),
+        claimCurrency: settings.claimCurrency
+      }, { merge: true });
+
+      setSettings(prev => ({ ...prev, adminPassword: "" }));
+      setAuthPasswordInput('');
+      setOriginalSettings(JSON.parse(JSON.stringify({ ...settings, adminPassword: "" })));
+      showToast('success', "Profile and system settings synchronized.");
+    } catch (err) {
+      showToast('error', "System settings update failed.");
     } finally {
       setSaving(false);
     }
   };
 
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 text-xs font-bold text-gray-400 uppercase tracking-widest animate-pulse">
-        Fetching System Parameter Settings...
-      </div>
-    );
+    return <div className="min-h-screen flex items-center justify-center bg-gray-50 text-xs font-bold text-gray-400 uppercase tracking-widest animate-pulse">Fetching System Parameters...</div>;
   }
 
   return (
-    <div className="p-10 max-w-4xl">
-      <form onSubmit={handleSaveChanges} className="space-y-8">
+    <div className="p-4 md:p-8 w-full animate-in fade-in duration-300 max-w-5xl mx-auto pb-24">
+      <form onSubmit={initiateSave} className="space-y-8">
 
-        {/* HORIZONTAL TAB CONTROL ACCESS BAR */}
-        <div className="flex border-b border-gray-200 bg-white p-2 rounded-2xl shadow-sm border border-gray-100 gap-2">
+        {/* TAB NAVIGATION */}
+        <div className="flex flex-wrap border-b border-gray-200 bg-white p-2 rounded-2xl shadow-sm border gap-2">
           {[
-            { id: 'General', label: 'General Configuration', icon: <Sliders size={15} /> },
-            { id: 'Attendance', label: 'Attendance & Shifting', icon: <Clock size={15} /> },
-            { id: 'Security', label: 'System Access Security', icon: <Shield size={15} /> },
-            { id: 'Profile', label: 'Admin Profile Hub', icon: <User size={15} /> }
+            { id: 'General', label: 'General', icon: <Sliders size={15} /> },
+            { id: 'Security', label: 'Security', icon: <Shield size={15} /> },
+            { id: 'Profile', label: 'Profile', icon: <User size={15} /> },
+            { id: 'Support', label: 'Support', icon: <LifeBuoy size={15} /> },
+            { id: 'Privacy', label: 'Privacy Policy', icon: <FileText size={15} /> }
           ].map((tab) => (
             <button
-              key={tab.id}
-              type="button"
-              onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold transition-all ${activeTab === tab.id
-                ? 'bg-[#F9A825] text-white shadow-sm'
-                : 'text-gray-500 hover:bg-gray-50'
-                }`}
+              key={tab.id} type="button" onClick={() => setActiveTab(tab.id)}
+              className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${activeTab === tab.id ? 'bg-[#F9A825] text-white shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}
             >
-              {tab.icon}
-              {tab.label}
+              {tab.icon} {tab.label}
             </button>
           ))}
         </div>
 
-        {/* ========================================================= */}
-        {/* SUB-PANEL TAB 1: GENERAL SYSTEM LIMITS */}
-        {/* ========================================================= */}
+        {/* TAB 1: GENERAL */}
         {activeTab === 'General' && (
           <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm space-y-6 animate-in fade-in duration-150">
             <div>
               <h3 className="text-base font-bold text-gray-800 flex items-center gap-2"><Globe className="text-[#F9A825]" size={18} /> General Parameters</h3>
-              <p className="text-xs text-gray-400 mt-0.5">Configure spatial parameters, default team constraints, and workspace values.</p>
+              <p className="text-xs text-gray-400 mt-0.5">Configure default team constraints and workspace values.</p>
             </div>
-
             <div className="grid grid-cols-2 gap-6">
               <div>
-                <label className="block text-[11px] font-bold text-gray-400 uppercase mb-2">Geofencing Tracking Radius (Meters)</label>
-                <input
-                  type="number"
-                  value={settings.radius}
-                  onChange={(e) => handleInputChange('radius', e.target.value)}
-                  className="w-full bg-gray-50 border border-gray-200 text-xs font-semibold p-3.5 rounded-xl outline-none focus:border-[#F9A825] transition-colors"
-                />
+                <label className="block text-[11px] font-bold text-gray-400 uppercase mb-2">Default Annual Leave Quota</label>
+                <input type="number" value={settings.annualLeaveQuota} onChange={(e) => handleInputChange('annualLeaveQuota', e.target.value)} className="w-full bg-gray-50 border border-gray-200 text-xs font-semibold p-3.5 rounded-xl outline-none focus:border-[#F9A825]" />
               </div>
-
-              <div>
-                <label className="block text-[11px] font-bold text-gray-400 uppercase mb-2">Default Annual Leave Quota (Days)</label>
-                <input
-                  type="number"
-                  value={settings.annualLeaveQuota}
-                  onChange={(e) => handleInputChange('annualLeaveQuota', e.target.value)}
-                  className="w-full bg-gray-50 border border-gray-200 text-xs font-semibold p-3.5 rounded-xl outline-none focus:border-[#F9A825] transition-colors"
-                />
-              </div>
-
               <div>
                 <label className="block text-[11px] font-bold text-gray-400 uppercase mb-2">Medical Claims Active Currency</label>
-                <div className="relative flex items-center bg-gray-50 border border-gray-200 rounded-xl px-3.5 py-1 focus-within:border-[#F9A825] transition-colors">
+                <div className="relative flex items-center bg-gray-50 border border-gray-200 rounded-xl px-3.5 py-1 focus-within:border-[#F9A825]">
                   <Landmark size={14} className="text-gray-400 mr-2" />
-                  <select
-                    value={settings.claimCurrency}
-                    onChange={(e) => handleInputChange('claimCurrency', e.target.value)}
-                    className="w-full bg-transparent py-2.5 text-xs font-bold text-gray-700 outline-none cursor-pointer"
-                  >
+                  <select value={settings.claimCurrency} onChange={(e) => handleInputChange('claimCurrency', e.target.value)} className="w-full bg-transparent py-2.5 text-xs font-bold text-gray-700 outline-none cursor-pointer">
                     <option value="LKR">Sri Lankan Rupee (LKR)</option>
                     <option value="USD">United States Dollar (USD)</option>
                     <option value="EUR">Euro Currency (EUR)</option>
@@ -234,172 +289,92 @@ const SettingsPage = () => {
           </div>
         )}
 
-        {/* ========================================================= */}
-        {/* SUB-PANEL TAB 2: ATTENDANCE & SHIFTING POLICIES */}
-        {/* ========================================================= */}
-        {activeTab === 'Attendance' && (
-          <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm space-y-6 animate-in fade-in duration-150">
-            <div>
-              <h3 className="text-base font-bold text-gray-800 flex items-center gap-2"><Clock className="text-[#F9A825]" size={18} /> Operational Attendance Rules</h3>
-              <p className="text-xs text-gray-400 mt-0.5">Control timeline fallbacks, verification margin parameters, and compliance guidelines.</p>
-            </div>
-
-            <div className="grid grid-cols-2 gap-6">
-              <div>
-                <label className="block text-[11px] font-bold text-gray-400 uppercase mb-2">Default Shift Start (Punch In)</label>
-                <input
-                  type="time"
-                  value={settings.workStart}
-                  onChange={(e) => handleInputChange('workStart', e.target.value)}
-                  className="w-full bg-gray-50 border border-gray-200 text-xs font-semibold p-3.5 rounded-xl outline-none focus:border-[#F9A825] transition-colors"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-bold text-gray-400 uppercase mb-2">Default Shift End (Punch Out)</label>
-                <input
-                  type="time"
-                  value={settings.workEnd}
-                  onChange={(e) => handleInputChange('workEnd', e.target.value)}
-                  className="w-full bg-gray-50 border border-gray-200 text-xs font-semibold p-3.5 rounded-xl outline-none focus:border-[#F9A825] transition-colors"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-bold text-gray-400 uppercase mb-2">Late Check-In Grace Period (Minutes)</label>
-                <input
-                  type="number"
-                  value={settings.gracePeriod}
-                  onChange={(e) => handleInputChange('gracePeriod', e.target.value)}
-                  className="w-full bg-gray-50 border border-gray-200 text-xs font-semibold p-3.5 rounded-xl outline-none focus:border-[#F9A825] transition-colors"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-bold text-gray-400 uppercase mb-2">Early Departure Allowance (Minutes)</label>
-                <input
-                  type="number"
-                  value={settings.earlyDepartureAllowance}
-                  onChange={(e) => handleInputChange('earlyDepartureAllowance', e.target.value)}
-                  className="w-full bg-gray-50 border border-gray-200 text-xs font-semibold p-3.5 rounded-xl outline-none focus:border-[#F9A825] transition-colors"
-                />
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ========================================================= */}
-        {/* SUB-PANEL TAB 3: ADVANCED APP SECURITY */}
-        {/* ========================================================= */}
+        {/* TAB 2: SECURITY */}
         {activeTab === 'Security' && (
           <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm space-y-6 animate-in fade-in duration-150">
             <div>
               <h3 className="text-base font-bold text-gray-800 flex items-center gap-2"><Shield className="text-[#F9A825]" size={18} /> Access Security Rules</h3>
-              <p className="text-xs text-gray-400 mt-0.5">Manage enrollment security constraints and cycle mobile application registration code values.</p>
+              <p className="text-xs text-gray-400 mt-0.5">Manage enrollment security constraints.</p>
             </div>
-
             <div className="space-y-6 divide-y divide-gray-100">
-              {/* Registration Token Box Row */}
               <div className="flex items-center justify-between pt-2">
                 <div className="max-w-md">
                   <h5 className="text-xs font-bold text-gray-700">App Roster Security Authorization Token</h5>
-                  <p className="text-[11px] text-gray-400 leading-relaxed mt-0.5">Required field mapping token used by mobile nodes during endpoint provisioning profiles setup.</p>
+                  <p className="text-[11px] text-gray-400 mt-0.5">Required field mapping token used by mobile nodes.</p>
                 </div>
                 <div className="flex items-center gap-3">
-                  <span className="bg-gray-100 font-mono text-xs font-black px-4 py-2.5 rounded-xl text-gray-700 tracking-wider border border-gray-200/40">
-                    {settings.companyCode}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={handleRegenerateCompanyCode}
-                    className="p-2.5 text-gray-500 hover:text-[#F9A825] bg-gray-50 border border-gray-200 hover:border-amber-200 rounded-xl transition-all"
-                    title="Cycle System Access Token"
-                  >
-                    <RefreshCw size={15} />
-                  </button>
+                  <span className="bg-gray-100 font-mono text-xs font-black px-4 py-2.5 rounded-xl text-gray-700 border border-gray-200/40">{settings.companyCode}</span>
+                  <button type="button" onClick={handleRegenerateCompanyCode} className="p-2.5 text-gray-500 hover:text-[#F9A825] bg-gray-50 border border-gray-200 hover:border-amber-200 rounded-xl transition-all cursor-pointer" title="Cycle Token"><RefreshCw size={15} /></button>
                 </div>
               </div>
 
-              {/* Force Mobile Users PIN Reset Toggle Option */}
               <div className="flex items-center justify-between pt-6">
                 <div className="max-w-md">
                   <h5 className="text-xs font-bold text-gray-700">Enforce Dynamic Global Mobile PIN Reset</h5>
-                  <p className="text-[11px] text-gray-400 leading-relaxed mt-0.5">When toggled, this forces all employee mobile client builds to wipe current cached 4-digit security PIN records and regenerate verification profiles on next initialization cycle step entry.</p>
+                  <p className="text-[11px] text-gray-400 mt-0.5">Push an immediate signal to all employee mobile apps forcing them to recreate their 4-digit security PIN.</p>
                 </div>
-                <label className="relative inline-flex items-center cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={settings.forcePinReset}
-                    onChange={(e) => handleInputChange('forcePinReset', e.target.checked)}
-                    className="sr-only peer"
-                  />
-                  <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#F9A825]"></div>
-                </label>
+                <button type="button" onClick={() => setShowPinResetModal(true)} className="px-5 py-2.5 bg-rose-50 text-rose-600 hover:bg-rose-100 border border-rose-200 rounded-xl text-xs font-bold transition-colors flex items-center gap-2 outline-none cursor-pointer">
+                  <Smartphone size={15} /> Trigger Reset Push
+                </button>
               </div>
             </div>
           </div>
         )}
 
-        {/* ========================================================= */}
-        {/* SUB-PANEL TAB 4: ADMIN PROFILE HUBS */}
-        {/* ========================================================= */}
+        {/* TAB 3: PROFILE */}
         {activeTab === 'Profile' && (
           <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm space-y-6 animate-in fade-in duration-150">
             <div>
-              <h3 className="text-base font-bold text-gray-800 flex items-center gap-2">
-                <KeyRound className="text-[#F9A825]" size={18} /> Admin Profile Management
-              </h3>
-              <p className="text-xs text-gray-400 mt-0.5">Modify your primary operational identity credentials, contact channels, and encryption access strings.</p>
+              <h3 className="text-base font-bold text-gray-800 flex items-center gap-2"><KeyRound className="text-[#F9A825]" size={18} /> Admin Profile Management</h3>
+              <p className="text-xs text-gray-400 mt-0.5">Modify your primary identity and access credentials.</p>
             </div>
 
-            <div className="grid grid-cols-2 gap-6">
+            <div className="flex items-center gap-6 pb-6 border-b border-gray-50">
+              <div className="relative">
+                <div className="w-20 h-20 rounded-full border-2 border-gray-100 bg-gray-50 overflow-hidden shadow-sm flex items-center justify-center">
+                  {settings.adminAvatar ? (
+                    <img src={settings.adminAvatar} alt="Admin" className="w-full h-full object-cover" />
+                  ) : (
+                    <User size={32} className="text-gray-300" />
+                  )}
+                </div>
+                <label className="absolute bottom-0 right-0 p-1.5 bg-[#F9A825] hover:bg-amber-600 text-white rounded-full shadow-md cursor-pointer transition-colors">
+                  <UploadCloud size={14} />
+                  <input type="file" className="hidden" accept="image/*" onChange={handleAvatarUpload} />
+                </label>
+              </div>
+              <div>
+                <h5 className="text-sm font-bold text-gray-800">Profile Display Image</h5>
+                <p className="text-[11px] text-gray-400 mt-0.5 mb-2">{imageUploading ? "Uploading to Cloudinary..." : "Upload a squared portrait image (JPG, PNG)."}</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-6 pt-2">
               <div>
                 <label className="block text-[11px] font-bold text-gray-400 uppercase mb-2">Administrative Full Name</label>
-                <input
-                  type="text"
-                  value={settings.adminName}
-                  onChange={(e) => handleInputChange('adminName', e.target.value)}
-                  className="w-full bg-gray-50 border border-gray-200 text-xs font-semibold p-3.5 rounded-xl outline-none focus:border-[#F9A825] transition-colors"
-                />
+                <input type="text" value={settings.adminName} onChange={(e) => handleInputChange('adminName', e.target.value)} className="w-full bg-gray-50 border border-gray-200 text-xs font-semibold p-3.5 rounded-xl outline-none focus:border-[#F9A825]" />
               </div>
-
               <div>
-                <label className="block text-[11px] font-bold text-gray-400 uppercase mb-2">Corporate Account Email Endpoint</label>
-                <input
-                  type="email"
-                  value={settings.adminEmail}
-                  onChange={(e) => handleInputChange('adminEmail', e.target.value)}
-                  className="w-full bg-gray-50 border border-gray-200 text-xs font-semibold p-3.5 rounded-xl outline-none focus:border-[#F9A825] transition-colors"
-                />
+                <label className="block text-[11px] font-bold text-gray-400 uppercase mb-2">Corporate Account Email</label>
+                <input type="email" value={settings.adminEmail} onChange={(e) => handleInputChange('adminEmail', e.target.value)} className="w-full bg-gray-50 border border-gray-200 text-xs font-semibold p-3.5 rounded-xl outline-none focus:border-[#F9A825]" />
               </div>
 
-              {/* FIXED: Added a dynamic visibility tracking wrapper for security password entry */}
               <div className="col-span-2">
-                <label className="block text-[11px] font-bold text-gray-400 uppercase mb-2">Update Security System Password (Leave Blank to Keep Current)</label>
+                <label className="block text-[11px] font-bold text-gray-400 uppercase mb-2">New Security Password (Leave Blank to Keep Current)</label>
                 <div className="relative flex items-center">
                   <input
-                    type={showPassword ? "text" : "password"} // Dynamic input type toggle
+                    type={showPassword ? "text" : "password"}
                     placeholder="••••••••"
                     value={settings.adminPassword}
                     onChange={(e) => handleInputChange('adminPassword', e.target.value)}
-                    className="w-full bg-gray-50 border border-gray-200 text-xs font-semibold p-3.5 pr-12 rounded-xl outline-none focus:border-[#F9A825] transition-colors"
+                    className="w-full bg-gray-50 border border-gray-200 text-xs font-semibold p-3.5 pr-12 rounded-xl outline-none focus:border-[#F9A825]"
                   />
-                  {/* Custom absolute view eye toggle button */}
                   <button
                     type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-4 text-gray-400 hover:text-[#F9A825] transition-colors outline-none"
+                    onClick={handlePasswordViewRequest}
+                    className={`absolute right-4 outline-none cursor-pointer transition-colors ${showPassword ? 'text-[#F9A825]' : 'text-gray-400 hover:text-gray-600'}`}
                   >
-                    {showPassword ? (
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" />
-                      </svg>
-                    ) : (
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                      </svg>
-                    )}
+                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                   </button>
                 </div>
               </div>
@@ -407,29 +382,117 @@ const SettingsPage = () => {
           </div>
         )}
 
-        {/* ========================================================= */}
-        {/* CONTROLS MASTER ACTIONS FOOTER BAR */}
-        {/* ========================================================= */}
-        <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-100">
-          <button
-            type="button"
-            onClick={handleDiscardChanges}
-            disabled={saving}
-            className="px-6 py-3 border border-gray-200 text-gray-500 hover:text-gray-700 hover:bg-gray-50 rounded-xl text-xs font-bold transition-all flex items-center gap-2 disabled:opacity-50"
-          >
-            <X size={14} /> Discard Local Adjustments
-          </button>
+        {/* TAB 4: HELP & SUPPORT */}
+        {activeTab === 'Support' && (
+          <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm space-y-6 animate-in fade-in duration-150">
+            <div>
+              <h3 className="text-base font-bold text-gray-800 flex items-center gap-2"><LifeBuoy className="text-[#F9A825]" size={18} /> Help & Support Hub</h3>
+              <p className="text-xs text-gray-400 mt-0.5">Contact the engineering team or reference documentation.</p>
+            </div>
+            <div className="bg-amber-50/50 border border-amber-100 rounded-xl p-5">
+              <h4 className="font-bold text-gray-800 text-sm mb-2">OnTime Engineering Department</h4>
+              <p className="text-xs text-gray-600 leading-relaxed mb-4">If you are experiencing critical system failures, API disconnects, or need database restorations outside of the 30-day Trash Bin limits, please contact the lead development team.</p>
+              <div className="space-y-2 text-xs font-medium text-gray-700">
+                <p><strong>Primary Lead:</strong> Praveen Thathsara</p>
+                <p><strong>Developer Email:</strong> praveenthathsara@ontimeweb.com</p>
+                <p><strong>Technical Support Line:</strong> +94 77 123 4567</p>
+                <p><strong>Institution:</strong> Sabaragamuwa University of Sri Lanka</p>
+              </div>
+            </div>
+          </div>
+        )}
 
-          <button
-            type="submit"
-            disabled={saving}
-            className="px-6 py-3 bg-[#F9A825] hover:bg-amber-600 text-white rounded-xl text-xs font-bold shadow-md hover:shadow-lg transition-all flex items-center gap-2 disabled:opacity-50"
-          >
-            <Save size={14} /> {saving ? "Updating Cloud Matrix Nodes..." : "Save Configuration Matrix"}
+        {/* TAB 5: PRIVACY POLICY */}
+        {activeTab === 'Privacy' && (
+          <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm space-y-6 animate-in fade-in duration-150">
+            <div>
+              <h3 className="text-base font-bold text-gray-800 flex items-center gap-2"><FileText className="text-[#F9A825]" size={18} /> Administrative Privacy Policy</h3>
+              <p className="text-xs text-gray-400 mt-0.5">Internal data management and tracking protocol rules.</p>
+            </div>
+            <div className="space-y-4 text-xs text-gray-600 leading-relaxed bg-gray-50 p-5 rounded-xl border border-gray-200 max-h-[400px] overflow-y-auto">
+              <h4 className="font-bold text-gray-800">1. Data Collection & Cloud Storage</h4>
+              <p>The OnTime Administrative Dashboard utilizes Firebase Cloud Firestore for real-time data persistence. All employee geofencing coordinates, mobile IP states, and hardware identifiers are securely stored and encrypted at rest by Google Cloud protocols.</p>
+
+              <h4 className="font-bold text-gray-800 mt-4">2. The 30-Day Retention Clause</h4>
+              <p>Any record deleted within this management console (including Offices, Users, and News) is temporarily staged in the encrypted Trash Bin architecture. If not restored, it is permanently wiped from all Google Cloud servers upon reaching its 30-day expiration matrix.</p>
+
+              <h4 className="font-bold text-gray-800 mt-4">3. Device Identification Tracking</h4>
+              <p>Administrators have the capability to force dynamic PIN resets. When toggled, the system clears verified hardware tokens across all employee devices to prevent unauthorized terminal access.</p>
+            </div>
+          </div>
+        )}
+
+        {/* GLOBAL SAVE FOOTER */}
+        <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-100">
+          <button type="button" onClick={handleDiscardChanges} disabled={saving} className="px-6 py-3 border border-gray-200 text-gray-500 hover:bg-gray-50 rounded-xl text-xs font-bold transition-all disabled:opacity-50 cursor-pointer">
+            Discard Adjustments
+          </button>
+          <button type="submit" disabled={saving || imageUploading} className="px-6 py-3 bg-[#F9A825] hover:bg-amber-600 text-white rounded-xl text-xs font-bold shadow-md transition-all disabled:opacity-50 cursor-pointer">
+            {saving ? "Updating Cloud Nodes..." : "Save Configuration Matrix"}
           </button>
         </div>
-
       </form>
+
+      {/* MODAL: AUTHENTICATION CONFIRMATION */}
+      {showAuthModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[99999] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 text-center animate-in zoom-in-95 duration-200">
+            <div className="w-12 h-12 rounded-full bg-amber-50 text-[#F9A825] mx-auto mb-4 flex items-center justify-center"><Shield size={24} /></div>
+            <h4 className="text-base font-bold text-gray-900 mb-1">Security Verification Required</h4>
+            <p className="text-xs text-gray-400 mb-6">You are attempting to change sensitive credentials. Please verify your identity by entering your <strong>current</strong> password.</p>
+            <input
+              type="password" placeholder="Current Password"
+              value={authPasswordInput} onChange={(e) => setAuthPasswordInput(e.target.value)}
+              className="w-full bg-gray-50 border border-gray-200 p-3 rounded-xl text-sm mb-6 outline-none focus:border-[#F9A825] text-center tracking-widest"
+              autoFocus
+            />
+            <div className="grid grid-cols-2 gap-3">
+              <button onClick={() => { setShowAuthModal(false); setAuthPasswordInput(''); setSaving(false); }} className="bg-gray-50 text-gray-600 hover:bg-gray-100 font-bold text-xs py-3 rounded-xl transition-colors cursor-pointer">Cancel</button>
+              <button onClick={executeSave} disabled={!authPasswordInput} className="bg-[#F9A825] text-white hover:bg-amber-600 font-bold text-xs py-3 rounded-xl shadow-sm transition-colors disabled:opacity-50 cursor-pointer">Verify & Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: UNLOCK PASSWORD VISIBILITY */}
+      {showViewPasswordModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[99999] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 text-center animate-in zoom-in-95 duration-200">
+            <div className="w-12 h-12 rounded-full bg-amber-50 text-[#F9A825] mx-auto mb-4 flex items-center justify-center"><Lock size={24} /></div>
+            <h4 className="text-base font-bold text-gray-900 mb-1">Unlock Password Visibility</h4>
+            <p className="text-xs text-gray-400 mb-6">Enter your <strong>current</strong> password to temporarily reveal the security password field.</p>
+            <input
+              type="password" placeholder="Current Password"
+              value={viewPasswordInput} onChange={(e) => setViewPasswordInput(e.target.value)}
+              className="w-full bg-gray-50 border border-gray-200 p-3 rounded-xl text-sm mb-6 outline-none focus:border-[#F9A825] text-center tracking-widest"
+              autoFocus
+            />
+            <div className="grid grid-cols-2 gap-3">
+              <button onClick={() => { setShowViewPasswordModal(false); setViewPasswordInput(''); }} className="bg-gray-50 text-gray-600 hover:bg-gray-100 font-bold text-xs py-3 rounded-xl transition-colors cursor-pointer">Cancel</button>
+              <button onClick={handleVerifyToViewPassword} disabled={!viewPasswordInput || verifyingView} className="bg-[#F9A825] text-white hover:bg-amber-600 font-bold text-xs py-3 rounded-xl shadow-sm transition-colors disabled:opacity-50 cursor-pointer">
+                {verifyingView ? "Verifying..." : "Unlock Field"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: GLOBAL PIN RESET CONFIRMATION */}
+      {showPinResetModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[99999] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 text-center animate-in zoom-in-95 duration-200">
+            <div className="w-12 h-12 rounded-full bg-rose-50 text-rose-600 mx-auto mb-4 flex items-center justify-center"><AlertTriangle size={24} /></div>
+            <h4 className="text-base font-bold text-gray-900 mb-1">Execute Global PIN Reset?</h4>
+            <p className="text-xs text-gray-400 mb-6">This will log out all currently active mobile application sessions and force every employee to create a new 4-digit PIN upon their next login. Are you sure?</p>
+            <div className="grid grid-cols-2 gap-3">
+              <button onClick={() => setShowPinResetModal(false)} className="bg-gray-50 text-gray-600 hover:bg-gray-100 font-bold text-xs py-3 rounded-xl transition-colors cursor-pointer">Cancel</button>
+              <button onClick={executeGlobalPinReset} className="bg-rose-600 text-white hover:bg-rose-700 font-bold text-xs py-3 rounded-xl shadow-sm transition-colors cursor-pointer">Yes, Execute Push</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <NotificationToast isOpen={toast.isOpen} type={toast.type} message={toast.message} onClose={() => setToast(prev => ({ ...prev, isOpen: false }))} />
     </div>
   );
 };
