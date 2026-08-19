@@ -17,22 +17,22 @@ const Sidebar = () => {
 
   // UPDATED: Real-time listener on the admin collection
   useEffect(() => {
-    // We wrap this in onAuthStateChanged to ensure we have the auth user before fetching
     const unsubscribeAuth = auth.onAuthStateChanged((user) => {
       if (user) {
-        const adminDocRef = doc(db, "admin", user.uid);
+        // DOUBLE CHECK THIS: Is your Firestore collection "admin" or "admins"?
+        const adminDocRef = doc(db, "admins", user.uid); 
         
-        // Listen to the document in real-time
         const unsubscribeSnapshot = onSnapshot(adminDocRef, (docSnap) => {
           if (docSnap.exists()) {
+            const data = docSnap.data();
             setAdminData({
-              name: docSnap.data().name || 'Admin',
-              photoUrl: docSnap.data().photoUrl || '' 
+              name: data.name || user.displayName || 'Admin',
+              // Add fallbacks to catch whatever field name your save function is using
+              photoUrl: data.photoUrl || data.avatar || data.profileImageUrl || user.photoURL || '' 
             });
           }
         });
 
-        // Cleanup the snapshot listener when component unmounts or user changes
         return () => unsubscribeSnapshot();
       }
     });
