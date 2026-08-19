@@ -1,62 +1,64 @@
 // src/pages/dashboard/GeofencingPage.jsx
 import React, { useState, useEffect } from 'react';
-import { Layers, Compass, MapPin, Plus, Calendar, Users } from 'lucide-react';
-import { streamOfficeZones, updateOfficeZone, streamTodayCheckedInStaff } from '../../services/geofenceService';
-import { saveShiftTemplate, streamShiftsByDate } from '../../services/shiftService';
+import { Layers, Compass, MapPin, Users, Edit3, XCircle, CheckCircle, PlusCircle, Trash2, AlertTriangle } from 'lucide-react';
+import ZoneMap from '../../components/dashboard/ZoneMap';
+import NotificationToast from '../../components/dashboard/NotificationToast';
+import { db } from '../../services/firebase';
+import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+// FIXED: Consolidated imports to a single line
+import { streamOfficeZones, updateOfficeZone, streamTodayCheckedInStaff, createOfficeZone, deleteOfficeZone } from '../../services/geofenceService';
 
 const GeofencingPage = () => {
-  const companyCode = "COM100";
-  
-  // Office boundary tracking states
   const [offices, setOffices] = useState([]);
   const [selectedOfficeId, setSelectedOfficeId] = useState('');
   const [isEditingZone, setIsEditingZone] = useState(false);
-  
-  // Form input fields states
+  const [isCreatingNewZone, setIsCreatingNewZone] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  const [formId, setFormId] = useState('');
   const [formName, setFormName] = useState('');
   const [formRadius, setFormRadius] = useState(50);
   const [formLat, setFormLat] = useState(6.7154669);
   const [formLon, setFormLon] = useState(80.7888601);
 
-  // Dynamic Shift lists states
-  const [shiftDate, setShiftDate] = useState(new Date().toISOString().split('T')[0]);
-  const [shiftName, setShiftName] = useState('');
-  const [activeShifts, setActiveShifts] = useState([]);
-  const [shiftLoading, setShiftLoading] = useState(false);
-
-  // Live Check-in tracking state variables
+  const [shiftDate] = useState(new Date().toISOString().split('T')[0]);
   const [onSiteEmployees, setOnSiteEmployees] = useState([]);
+  const [toast, setToast] = useState({ isOpen: false, type: 'success', message: '' });
 
-  // 1. Establish the live stream listener to the active offices collection
+  const showToast = (type, message) => setToast({ isOpen: true, type, message });
+
   useEffect(() => {
     const unsubscribe = streamOfficeZones((officeList) => {
       setOffices(officeList);
-      if (officeList.length > 0 && !selectedOfficeId) {
+      if (officeList.length > 0 && !selectedOfficeId && !isCreatingNewZone) {
         setSelectedOfficeId(officeList[0].id);
       }
     });
     return () => unsubscribe();
-  }, [selectedOfficeId]);
+  }, [selectedOfficeId, isCreatingNewZone]);
 
-  // 2. Establish live stream listener for Schedules Subcollections
   useEffect(() => {
-    const unsubscribeShifts = streamShiftsByDate(companyCode, shiftDate, (shiftsData) => {
-      setActiveShifts(shiftsData);
-    });
-    return () => unsubscribeShifts();
-  }, [shiftDate]);
+    if (selectedOfficeId) {
+      const unsubscribeOnSite = streamTodayCheckedInStaff(shiftDate, (checkedInStaff) => {
+        setOnSiteEmployees(checkedInStaff);
+      });
+      return () => unsubscribeOnSite();
+    }
+  }, [shiftDate, selectedOfficeId]);
 
-  // 3. Reactive effect hook tracking live check-in logs matching the active date selection box
-  useEffect(() => {
-    const unsubscribeOnSite = streamTodayCheckedInStaff(shiftDate, (checkedInStaff) => {
-      setOnSiteEmployees(checkedInStaff);
-    });
-    return () => unsubscribeOnSite();
-  }, [shiftDate]);
-
-  // Find the currently active selected office object metrics
   const activeOffice = offices.find(o => o.id === selectedOfficeId) || {
     name: 'Loading...', radius: 50, latitude: 6.7154, longitude: 80.7888
+  };
+
+  const handleInitiateCreateMode = () => {
+    setIsEditingZone(false);
+    setSelectedOfficeId('');
+    setFormId('NEW_CAMPUS_ID');
+    setFormName('New Branch Name');
+    setFormRadius(100);
+    setFormLat(6.7154669);
+    setFormLon(80.7888601);
+    setIsCreatingNewZone(true);
   };
 
   const startEditing = () => {
@@ -64,248 +66,189 @@ const GeofencingPage = () => {
     setFormRadius(activeOffice.radius);
     setFormLat(activeOffice.latitude);
     setFormLon(activeOffice.longitude);
+    setIsCreatingNewZone(false);
     setIsEditingZone(true);
   };
 
-  const handleUpdateOffice = async (e) => {
+  const handleMarkerDragUpdate = (newLat, newLon) => {
+    setFormLat(Number(newLat));
+    setFormLon(Number(newLon));
+  };
+
+  const handleFormSubmit = async (e) => {
     e.preventDefault();
     try {
-      await updateOfficeZone(selectedOfficeId, {
-        name: formName,
-        radius: formRadius,
-        latitude: formLat,
-        longitude: formLon
-      });
-      setIsEditingZone(false);
-      alert("Office boundary data updated successfully!");
+      if (isCreatingNewZone) {
+        await createOfficeZone(formId, { name: formName, radius: Number(formRadius), latitude: Number(formLat), longitude: Number(formLon) });
+        showToast("success", `New operational zone "${formName}" deployed successfully!`);
+        setSelectedOfficeId(formId.toUpperCase().replace(/\s+/g, '_'));
+        setIsCreatingNewZone(false);
+      } else {
+        await updateOfficeZone(selectedOfficeId, { name: formName, radius: Number(formRadius), latitude: Number(formLat), longitude: Number(formLon) });
+        setIsEditingZone(false);
+        showToast("success", "Office boundary coordinates synchronized with the cloud database!");
+      }
     } catch (error) {
-      alert("Failed to write coordinates: " + error.message);
+      showToast("error", error.message);
     }
   };
 
-  const handleCreateShift = async (e) => {
-    e.preventDefault();
-    if (!shiftName.trim()) return;
-    setShiftLoading(true);
+  const handleConfirmDelete = async () => {
+    setShowDeleteConfirm(false);
+    if (!selectedOfficeId) return;
 
     try {
-      await saveShiftTemplate(companyCode, shiftDate, shiftName);
-      setShiftName('');
-      alert(`Shift assigned successfully for ${shiftDate}!`);
+      // 1. Snapshot into Trash Bin
+      await addDoc(collection(db, "trash_bin"), {
+        originalCollection: "offices",
+        originalId: selectedOfficeId,
+        deletedAt: serverTimestamp(),
+        itemMemoryData: {
+          ...activeOffice,
+          createdAt: activeOffice.createdAt || serverTimestamp(),
+          updatedAt: serverTimestamp()
+        }
+      });
+
+      // 2. Call the service to delete from the active collection
+      await deleteOfficeZone(selectedOfficeId);
+
+      showToast("success", "Location moved to Trash Bin.");
+
+      // 3. Reset selection to trigger list update
+      setSelectedOfficeId('');
     } catch (error) {
-      alert("Failed to save shift entry map data: " + error.message);
-    } finally {
-      setShiftLoading(false);
+      showToast("error", "Deletion failure: " + error.message);
     }
+  };
+
+  const handleCancelAction = () => {
+    setIsEditingZone(false);
+    setIsCreatingNewZone(false);
+    if (offices.length > 0) setSelectedOfficeId(offices[0].id);
   };
 
   return (
-    <div className="p-10">
+    // FIXED: Adjusted padding logic for better layout alignment
+    <div className="p-4 md:p-8 w-full animate-in fade-in duration-300">
       <div className="grid grid-cols-12 gap-8">
-        
-        {/* LEFT COLUMN: Map & Configuration Panel */}
         <div className="col-span-8 flex flex-col space-y-6">
-          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col min-h-[420px] relative">
-            
-            <div className="bg-[#FFF4E5]/50 px-6 py-4 border-b border-orange-50 flex justify-between items-center">
-              <div className="flex items-center gap-3 font-bold text-gray-800 text-sm">
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col min-h-[460px] relative">
+            <div className="bg-[#FFF4E5]/50 px-6 py-4 border-b border-orange-50 flex justify-between items-center z-10">
+              <div className="flex items-center gap-3 font-bold text-gray-800 text-sm flex-1">
                 <MapPin className="text-[#F9A825]" size={18} />
-                <span>Zone:</span>
-                <select 
-                  className="bg-white border border-orange-200 rounded-lg px-2 py-1 text-xs outline-none focus:border-[#F9A825]"
-                  value={selectedOfficeId}
-                  onChange={(e) => setSelectedOfficeId(e.target.value)}
-                >
-                  {offices.map(off => (
-                    <option key={off.id} value={off.id}>{off.id} ({off.name})</option>
-                  ))}
-                </select>
+                <span>Zone Branch Context:</span>
+                {!isCreatingNewZone ? (
+                  <select className="bg-white border border-orange-200 rounded-lg px-2 py-1 text-xs font-bold text-gray-600 outline-none focus:border-[#F9A825] cursor-pointer" value={selectedOfficeId} onChange={(e) => { setSelectedOfficeId(e.target.value); setIsEditingZone(false); }}>
+                    {offices.map(off => (
+                      <option key={off.id} value={off.id}>{off.id} ({off.name})</option>
+                    ))}
+                  </select>
+                ) : (
+                  <span className="text-xs bg-amber-100 text-amber-800 px-3 py-1 rounded-lg font-black tracking-wide">CREATING NEW LOCATION CORE</span>
+                )}
               </div>
-              <div className="flex items-center gap-4 text-gray-500">
-                <Layers size={18} />
-                <Compass size={18} />
-              </div>
-            </div>
-
-            <div className="flex-1 bg-gray-50 p-6 relative flex flex-col justify-between">
-              {!isEditingZone ? (
-                <div className="bg-white/90 backdrop-blur-sm p-5 rounded-xl border border-orange-100/70 shadow-md max-w-xs z-10">
-                  <div className="flex justify-between items-start mb-1 gap-4">
-                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">ID: {selectedOfficeId}</span>
-                    {/* FIXED COUNT BADGE: Dynamically displays active count unique to this selected branch ID */}
-                    <span className="bg-green-50 text-green-600 text-[10px] px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
-                       {onSiteEmployees.filter(emp => emp.assignedOfficeId === selectedOfficeId).length} On-site
-                    </span>
-                  </div>
-                  <h4 className="font-bold text-[#F9A825] text-base mb-2">{activeOffice.name} Campus</h4>
-                  <div className="space-y-1 text-xs text-gray-500 font-medium">
-                    <p>📍 Verification Radius: <span className="font-bold text-gray-700">{activeOffice.radius}m</span></p>
-                    <p>🌐 Lat Coordinate: {activeOffice.latitude}° N</p>
-                    <p>🌐 Lon Coordinate: {activeOffice.longitude}° E</p>
-                  </div>
-                </div>
-              ) : (
-                <form onSubmit={handleUpdateOffice} className="bg-white p-5 rounded-xl border border-orange-100 shadow-md max-w-sm space-y-3 z-10">
-                  <h4 className="font-bold text-gray-800 text-xs uppercase text-gray-400">Edit Office Configuration</h4>
-                  <div>
-                    <label className="block text-[10px] font-bold text-gray-400 mb-0.5">Office Label Display Name</label>
-                    <input 
-                      type="text" className="w-full bg-gray-50 border border-gray-200 rounded-lg p-2 text-xs outline-none"
-                      value={formName} onChange={(e) => setFormName(e.target.value)} required
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-[10px] font-bold text-gray-400 mb-0.5">Latitude</label>
-                      <input 
-                        type="number" step="any" className="w-full bg-gray-50 border border-gray-200 rounded-lg p-2 text-xs outline-none"
-                        value={formLat} onChange={(e) => setFormLat(e.target.value)} required
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-bold text-gray-400 mb-0.5">Longitude</label>
-                      <input 
-                        type="number" step="any" className="w-full bg-gray-50 border border-gray-200 rounded-lg p-2 text-xs outline-none"
-                        value={formLon} onChange={(e) => setFormLon(e.target.value)} required
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-gray-400 mb-0.5">Geofence Gate Radius (Meters)</label>
-                    <input 
-                      type="number" className="w-full bg-gray-50 border border-gray-200 rounded-lg p-2 text-xs outline-none"
-                      value={formRadius} onChange={(e) => setFormRadius(e.target.value)} required
-                    />
-                  </div>
-                  <div className="flex gap-2 pt-2">
-                    <button type="submit" className="bg-[#F9A825] text-white font-bold text-xs py-2 rounded-lg flex-1">
-                      Save Profile
-                    </button>
-                    <button 
-                      type="button" 
-                      onClick={() => setIsEditingZone(false)} 
-                      className="bg-gray-100 text-gray-600 text-xs py-2 rounded-lg px-3"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </form>
-              )}
-
-              <div className="absolute inset-0 opacity-10 pointer-events-none bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:16px_16px]"></div>
-
-              <div className="flex justify-end z-10 mt-auto">
-                <button 
-                  type="button" onClick={startEditing}
-                  className="bg-[#F9A825] text-white p-3.5 rounded-full shadow-lg hover:bg-orange-500 transition-all"
-                >
-                  <MapPin size={22} />
+              {!isEditingZone && !isCreatingNewZone && (
+                <button type="button" onClick={handleInitiateCreateMode} className="flex items-center gap-1.5 bg-[#F9A825] hover:bg-orange-500 text-white font-bold text-xs px-4 py-2 rounded-xl shadow-sm transition-colors mr-4">
+                  <PlusCircle size={14} /> Add New Zone
                 </button>
-              </div>
+              )}
+            </div>
+            <div className="flex-1 w-full h-full relative p-4 bg-gray-50 flex flex-col">
+              <ZoneMap latitude={isEditingZone || isCreatingNewZone ? formLat : activeOffice.latitude} longitude={isEditingZone || isCreatingNewZone ? formLon : activeOffice.longitude} radius={isEditingZone || isCreatingNewZone ? formRadius : activeOffice.radius} isEditing={isEditingZone || isCreatingNewZone} onMarkerDrag={handleMarkerDragUpdate} />
             </div>
           </div>
 
-          {/* Presence Feed Display Container */}
-          <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
-            <div className="flex items-center gap-2 font-bold text-gray-900 text-sm mb-4">
-              <Users className="text-[#F9A825]" size={18} />
-              Live Presence Feed
-            </div>
-            
-            <div className="overflow-y-auto max-h-[160px] space-y-2 pr-1">
-              {/* FIXED LOOP: Filters list items by active drop down value and attaches strict unique key pairs */}
-              {onSiteEmployees
-                .filter(staff => staff.assignedOfficeId === selectedOfficeId)
-                .map((staff, idx) => (
+          {!isCreatingNewZone && (
+            <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
+              <div className="flex items-center gap-2 font-bold text-gray-900 text-sm mb-4">
+                <Users className="text-[#F9A825]" size={18} /> Live Presence Feed
+              </div>
+              <div className="overflow-y-auto max-h-[160px] space-y-2 pr-1">
+                {onSiteEmployees.filter(staff => staff.assignedOfficeId === selectedOfficeId).map((staff, idx) => (
                   <div key={`${staff.userId}-${staff.id || idx}`} className="flex justify-between items-center bg-gray-50 p-3 rounded-xl border border-gray-100">
                     <div className="flex items-center gap-3">
-                      <div className="w-7 h-7 bg-green-100 rounded-full flex items-center justify-center font-bold text-xs text-green-600">
-                        ✔
-                      </div>
+                      <div className="w-7 h-7 bg-green-100 rounded-full flex items-center justify-center font-bold text-xs text-green-600">✔</div>
                       <div>
                         <h5 className="text-xs font-bold text-gray-800">{staff.employeeName}</h5>
-                        <p className="text-[10px] text-gray-400 font-mono font-medium">User ID: {staff.userId}</p>
                         <p className="text-[10px] text-[#F9A825] font-medium">Location: {staff.checkInLat?.toFixed(5)}°, {staff.checkInLon?.toFixed(5)}°</p>
                       </div>
                     </div>
-                    <span className="text-[11px] font-bold text-gray-500 bg-white border border-gray-200 px-2.5 py-1 rounded-md">
-                      🕒 {staff.checkInTime}
-                    </span>
+                    <span className="text-[11px] font-bold text-gray-500 bg-white border border-gray-200 px-2.5 py-1 rounded-md">🕒 {staff.checkInTime}</span>
                   </div>
                 ))}
-
-              {/* FIXED CONDITIONAL EMPTY STATE: Computes empty notice accurately on the filtered results */}
-              {onSiteEmployees.filter(staff => staff.assignedOfficeId === selectedOfficeId).length === 0 && (
-                <p className="text-xs text-gray-400 text-center py-6">No mobile check-ins registered for this branch choice.</p>
-              )}
+                {onSiteEmployees.filter(staff => staff.assignedOfficeId === selectedOfficeId).length === 0 && (
+                  <p className="text-xs text-gray-400 text-center py-6">No mobile check-ins registered for this branch choice.</p>
+                )}
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
-        {/* RIGHT COLUMN: Active Shift Planner Interface */}
         <div className="col-span-4 space-y-6">
-          <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm flex flex-col h-full justify-between min-h-[640px]">
-            <div>
-              <div className="flex justify-between items-center mb-6">
-                <h3 className="font-bold text-gray-900 text-base">Shift Planner</h3>
-                <button type="button" className="text-[#F9A825] text-xs font-bold flex items-center gap-1">
-                  <Calendar size={14} /> View Calendar
-                </button>
-              </div>
-
-              <form onSubmit={handleCreateShift} className="bg-[#FFF4E5]/30 border border-orange-100/50 rounded-xl p-4 space-y-4 mb-6">
-                <span className="text-[10px] font-bold text-[#F9A825] block uppercase tracking-wider">Quick Create Template</span>
-                <input 
-                  type="date" className="w-full bg-white border border-gray-100 rounded-lg p-2 text-xs text-gray-700 outline-none focus:border-[#F9A825]"
-                  value={shiftDate} onChange={(e) => setShiftDate(e.target.value)} required
-                />
-                <input 
-                  type="text" placeholder="Shift Name (e.g. Morning 8 AM - 4 PM)" className="w-full bg-white border border-gray-100 rounded-lg p-2 text-xs text-gray-700 outline-none focus:border-[#F9A825]"
-                  value={shiftName} onChange={(e) => setShiftName(e.target.value)} required
-                />
-                <button 
-                  type="submit" disabled={shiftLoading}
-                  className="w-full bg-[#F9A825] text-white text-xs font-bold py-2 rounded-lg shadow-sm hover:bg-orange-500 transition-colors disabled:opacity-50"
-                >
-                  {shiftLoading ? 'Saving...' : 'Save Template'}
-                </button>
-              </form>
-
-              <div className="space-y-3">
-                <div className="flex justify-between items-center">
-                  <h4 className="text-xs font-bold text-gray-800">Shifts on This Day</h4>
-                  <span className="bg-blue-50 text-blue-600 text-[10px] px-2 py-0.5 rounded-full font-bold">
-                    {activeShifts.length} Active
-                  </span>
+          <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm flex flex-col justify-between min-h-[460px]">
+            {!isEditingZone && !isCreatingNewZone ? (
+              <div className="space-y-6">
+                <div className="flex justify-between items-center border-b border-gray-50 pb-4">
+                  <h3 className="font-bold text-gray-900 text-base">Zone Parameters</h3>
+                  <span className="bg-green-50 text-green-600 text-[10px] px-2.5 py-1 rounded-full font-bold">{onSiteEmployees.filter(emp => emp.assignedOfficeId === selectedOfficeId).length} Active On-site</span>
                 </div>
-
-                <div className="space-y-2 max-h-[180px] overflow-y-auto pr-1">
-                  {activeShifts.map((shift, idx) => (
-                    <div key={shift.id || `shift-${idx}`} className="bg-gray-50/70 p-3 rounded-xl border border-gray-100 flex items-center justify-between">
-                      <div className="flex gap-3 items-center">
-                        <div className="w-1 h-8 bg-blue-600 rounded-full" />
-                        <div>
-                          <h5 className="text-xs font-bold text-gray-800 max-w-[180px] truncate">{shift.detail}</h5>
-                          <p className="text-[10px] text-gray-400 font-medium">Assignee: {shift.employeeName}</p>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                  
-                  {activeShifts.length === 0 && (
-                    <p className="text-[11px] text-gray-400 text-center py-4">No schedules configured for this date choice</p>
+                <div className="bg-[#FFF4E5]/30 rounded-2xl border border-orange-100/50 p-5 space-y-4">
+                  <div><span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-1">Office Identifier</span><h4 className="font-mono text-sm font-black text-gray-700 tracking-wide">{selectedOfficeId}</h4></div>
+                  <div><span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-1">Campus Hub Label</span><h4 className="font-black text-[#F9A825] text-lg leading-tight">{activeOffice.name} Campus</h4></div>
+                </div>
+                <div className="p-2 space-y-3.5">
+                  <div className="flex justify-between text-xs font-semibold"><span className="text-gray-400">📍 Fence Radius Check:</span><span className="text-gray-800 font-bold">{activeOffice.radius} meters</span></div>
+                  <div className="flex justify-between text-xs font-semibold"><span className="text-gray-400">🌐 Lat coordinate:</span><span className="text-gray-700 font-mono">{activeOffice.latitude}° N</span></div>
+                  <div className="flex justify-between text-xs font-semibold"><span className="text-gray-400">🌐 Lon coordinate:</span><span className="text-gray-700 font-mono">{activeOffice.longitude}° E</span></div>
+                </div>
+                <div className="flex gap-3 mt-4">
+                  <button type="button" onClick={() => setShowDeleteConfirm(true)} className="w-12 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl transition-colors flex items-center justify-center outline-none cursor-pointer"><Trash2 size={16} /></button>
+                  <button type="button" onClick={startEditing} className="flex-1 bg-[#F9A825] hover:bg-orange-500 text-white text-xs font-bold py-3 rounded-xl shadow-sm transition-colors flex items-center justify-center gap-2 outline-none cursor-pointer"><Edit3 size={14} /> Adjust Coordinates</button>
+                </div>
+              </div>
+            ) : (
+              <form onSubmit={handleFormSubmit} className="space-y-5">
+                <div className="border-b border-gray-50 pb-4">
+                  <h3 className="font-bold text-gray-900 text-base">{isCreatingNewZone ? "Register Fresh Zone" : "Modify Boundary Config"}</h3>
+                  <p className="text-[11px] text-orange-500 font-medium mt-1 animate-pulse">💡 Hint: You can drag the marker pin on the map to set coordinates visually.</p>
+                </div>
+                <div className="space-y-4">
+                  {isCreatingNewZone && (
+                    <div><label className="block text-[10px] font-bold text-gray-400 uppercase mb-1.5">Custom Unique ID (No Spaces)</label><input type="text" placeholder="e.g., SE_CAMPUS_SUSL" className="w-full bg-gray-50 border border-gray-200 text-xs font-mono font-bold text-gray-700 p-3 rounded-xl outline-none focus:border-[#F9A825] transition-colors uppercase" value={formId} onChange={(e) => setFormId(e.target.value.replace(/\s+/g, '_'))} required /></div>
                   )}
+                  <div><label className="block text-[10px] font-bold text-gray-400 uppercase mb-1.5">Campus Location Title</label><input type="text" className="w-full bg-gray-50 border border-gray-200 text-xs font-bold text-gray-700 p-3 rounded-xl outline-none focus:border-[#F9A825] transition-colors" value={formName} onChange={(e) => setFormName(e.target.value)} required /></div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div><label className="block text-[10px] font-bold text-gray-400 uppercase mb-1.5">Latitude</label><input type="number" step="any" className="w-full bg-gray-50 border border-gray-200 font-mono text-xs p-3 rounded-xl outline-none focus:border-[#F9A825] transition-colors" value={formLat} onChange={(e) => setFormLat(e.target.value)} required /></div>
+                    <div><label className="block text-[10px] font-bold text-gray-400 uppercase mb-1.5">Longitude</label><input type="number" step="any" className="w-full bg-gray-50 border border-gray-200 font-mono text-xs p-3 rounded-xl outline-none focus:border-[#F9A825] transition-colors" value={formLon} onChange={(e) => setFormLon(e.target.value)} required /></div>
+                  </div>
+                  <div><label className="block text-[10px] font-bold text-gray-400 uppercase mb-1.5">Geofence Radius (Meters)</label><input type="number" className="w-full bg-gray-50 border border-gray-200 text-xs font-bold p-3 rounded-xl outline-none focus:border-[#F9A825] transition-colors" value={formRadius} onChange={(e) => setFormRadius(e.target.value)} required /></div>
                 </div>
-              </div>
-            </div>
-
-            <button type="button" className="w-full mt-4 border-2 border-dashed border-gray-200 rounded-xl py-3 text-xs font-bold text-gray-500 flex items-center justify-center gap-2">
-              <Plus size={16} /> Assign New Shift
-            </button>
+                <div className="grid grid-cols-2 gap-3 pt-4">
+                  <button type="button" onClick={handleCancelAction} className="w-full bg-gray-50 border border-gray-200 text-gray-500 text-xs font-bold py-3 rounded-xl transition-colors flex items-center justify-center gap-1.5"><XCircle size={14} /> Cancel</button>
+                  <button type="submit" className="w-full bg-[#F9A825] hover:bg-orange-500 text-white text-xs font-bold py-3 rounded-xl shadow-sm transition-all flex items-center justify-center gap-1.5"><CheckCircle size={14} /> {isCreatingNewZone ? "Deploy Zone" : "Commit Changes"}</button>
+                </div>
+              </form>
+            )}
           </div>
         </div>
-
       </div>
+
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 transition-opacity">
+          <div className="bg-white rounded-[2rem] border border-gray-100 shadow-2xl max-w-sm w-full p-6 text-center animate-in fade-in zoom-in-95 duration-200">
+            <div className="w-12 h-12 rounded-2xl bg-rose-50 flex items-center justify-center text-rose-600 mx-auto mb-4"><AlertTriangle size={24} /></div>
+            <h4 className="text-base font-bold text-gray-900 mb-1">Move to Trash Bin</h4>
+            <p className="text-xs text-gray-400 leading-relaxed px-2 mb-6">Are you sure you want to remove this location zone? It will be moved to the Trash Bin and can be restored within 30 days.</p>
+            <div className="grid grid-cols-2 gap-3">
+              <button type="button" onClick={() => setShowDeleteConfirm(false)} className="w-full bg-gray-50 hover:bg-gray-100 border border-gray-200 text-gray-500 text-xs font-bold py-3 rounded-xl transition-colors">Cancel</button>
+              <button type="button" onClick={handleConfirmDelete} className="w-full bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold py-3 rounded-xl shadow-sm transition-all">Move to Trash</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <NotificationToast isOpen={toast.isOpen} type={toast.type} message={toast.message} onClose={() => setToast(prev => ({ ...prev, isOpen: false }))} />
     </div>
   );
 };

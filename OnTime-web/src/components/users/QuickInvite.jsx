@@ -1,103 +1,73 @@
+// src/components/users/QuickInvite.jsx
 import React, { useState } from 'react';
-import { Send, ChevronDown, Loader2 } from 'lucide-react';
-import { inviteUser } from '../../services/employeeService';
-import toast from 'react-hot-toast';
+import { Send, UserPlus, CheckCircle2, AlertCircle } from 'lucide-react';
+import { db } from '../../services/firebase';
+import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 
 const QuickInvite = () => {
-  const [email, setEmail] = useState('');
-  const [phone, setPhone] = useState('');
-  const [role, setRole] = useState('Viewer');
-  const [sending, setSending] = useState(false);
+  const [formData, setFormData] = useState({ name: '', phone: '', role: 'Employee', managerPhone: '' });
+  const [isSending, setIsSending] = useState(false);
+  const [message, setMessage] = useState(null);
 
-  const handleSendInvite = async (e) => {
+  const handleInvite = async (e) => {
     e.preventDefault();
+    setIsSending(true); setMessage(null);
 
-    if (!email) {
-      toast.error('Email is required!');
-      return;
-    }
-
-    setSending(true);
-    const loadingToast = toast.loading('Sending invitation...');
     try {
-      await inviteUser({ email, phone, role });
-      toast.success('Invitation sent and user registered successfully!', { id: loadingToast });
-      setEmail('');
-      setPhone('');
-      setRole('Viewer');
+      if (!formData.name || !formData.phone) throw new Error("Name and Phone are required.");
+      const cleanPhone = formData.phone.startsWith('+') ? formData.phone : `+${formData.phone.trim()}`;
+      
+      let cleanManagerPhone = null;
+      if (formData.managerPhone) {
+        cleanManagerPhone = formData.managerPhone.startsWith('+') ? formData.managerPhone : `+${formData.managerPhone.trim()}`;
+      }
+
+      const userData = {
+        name: formData.name.trim(),
+        phone: cleanPhone,
+        role: formData.role,
+        userType: formData.role.toLowerCase(),
+        company_code: "COM100",
+        invited: true,
+        status: "Pending",
+        assignedManagerPhone: cleanManagerPhone,
+        createdAt: serverTimestamp()
+      };
+
+      await setDoc(doc(db, "pre_authorized_users", cleanPhone), userData);
+      
+      setMessage({ type: 'success', text: 'Invitation created successfully!' });
+      setFormData({ name: '', phone: '', role: 'Employee', managerPhone: '' });
+      setTimeout(() => setMessage(null), 3000);
     } catch (error) {
-      toast.error('Failed to send invitation: ' + error.message, { id: loadingToast });
-    } finally {
-      setSending(false);
-    }
+      setMessage({ type: 'error', text: error.message || 'Failed to send invite.' });
+    } finally { setIsSending(false); }
   };
 
   return (
-    <div className="bg-gradient-to-br from-[#F5A623] to-[#F9A825] rounded-2xl p-6 shadow-sm relative overflow-hidden flex flex-col justify-between h-full">
-      {/* Background shape */}
-      <div className="absolute -right-8 -top-8 w-32 h-32 bg-white/10 rounded-full blur-xl"></div>
-      
-      <div className="flex justify-between items-start mb-6 relative z-10">
+    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-8 flex flex-col justify-center h-full min-h-[280px]">
+      <div className="flex items-center gap-3 mb-6">
+        <div className="w-12 h-12 bg-amber-50 text-[#F9A825] rounded-2xl flex items-center justify-center"><UserPlus size={24} /></div>
         <div>
-          <h3 className="text-xl font-bold text-gray-900 mb-1">Quick Invite</h3>
-          <p className="text-orange-900/70 text-sm font-medium">Send an invitation link via email or phone.</p>
-        </div>
-        <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center shadow-sm">
-          {sending ? (
-            <Loader2 className="text-[#F9A825] animate-spin" size={18} />
-          ) : (
-            <Send className="text-[#F9A825] ml-1" size={18} />
-          )}
+          <h3 className="text-lg font-bold text-gray-900 leading-tight">Quick Invite</h3>
+          <p className="text-xs text-gray-500 font-medium">Add a single user to the roster.</p>
         </div>
       </div>
 
-      <form onSubmit={handleSendInvite} className="space-y-4 relative z-10">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <input 
-            type="email" 
-            placeholder="Email Address" 
-            value={email}
-            disabled={sending}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-            className="bg-white rounded-xl px-4 py-3 outline-none text-gray-800 placeholder-gray-400 w-full focus:ring-2 focus:ring-orange-300 disabled:opacity-60"
-          />
-          <input 
-            type="tel" 
-            placeholder="Phone (Optional)" 
-            value={phone}
-            disabled={sending}
-            onChange={(e) => setPhone(e.target.value)}
-            className="bg-white rounded-xl px-4 py-3 outline-none text-gray-800 placeholder-gray-400 w-full focus:ring-2 focus:ring-orange-300 disabled:opacity-60"
-          />
+      <form onSubmit={handleInvite} className="space-y-4">
+        <div className="grid grid-cols-2 gap-4">
+          <input type="text" placeholder="Full Name" required value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})} className="w-full bg-gray-50 border border-gray-200 text-sm font-medium py-3 px-4 rounded-xl outline-none focus:border-[#F9A825]" />
+          <input type="text" placeholder="User Phone (+94...)" required value={formData.phone} onChange={(e) => setFormData({...formData, phone: e.target.value})} className="w-full bg-gray-50 border border-gray-200 text-sm font-medium py-3 px-4 rounded-xl outline-none focus:border-[#F9A825]" />
         </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="relative">
-            <select 
-              value={role}
-              disabled={sending}
-              onChange={(e) => setRole(e.target.value)}
-              className="appearance-none bg-white rounded-xl px-4 py-3 outline-none text-gray-800 w-full focus:ring-2 focus:ring-orange-300 cursor-pointer disabled:opacity-60"
-            >
-              <option value="Viewer">Viewer</option>
-              <option value="Editor">Editor</option>
-              <option value="Manager">Manager</option>
-              <option value="Admin">Admin</option>
-              <option value="Employee">Employee</option>
-            </select>
-            <ChevronDown className="absolute right-4 top-3.5 text-gray-500 pointer-events-none" size={18} />
-          </div>
-          <button 
-            type="submit"
-            disabled={sending}
-            className="bg-[#E69315] hover:bg-[#D58510] text-white font-bold rounded-xl px-4 py-3 transition-colors shadow-sm disabled:opacity-60 flex items-center justify-center gap-2 cursor-pointer"
-          >
-            {sending && <Loader2 className="animate-spin" size={16} />}
-            {sending ? 'Sending...' : 'Send Invite'}
-          </button>
+        <div className="grid grid-cols-2 gap-4">
+          <input type="text" placeholder="Manager Phone (Optional)" value={formData.managerPhone} onChange={(e) => setFormData({...formData, managerPhone: e.target.value})} className="w-full bg-gray-50 border border-gray-200 text-sm font-medium py-3 px-4 rounded-xl outline-none focus:border-[#F9A825]" />
+          <select value={formData.role} onChange={(e) => setFormData({...formData, role: e.target.value})} className="w-full bg-gray-50 border border-gray-200 text-sm font-bold text-gray-700 py-3 px-4 rounded-xl outline-none focus:border-[#F9A825]">
+            <option value="Employee">Employee</option><option value="Manager">Manager</option><option value="Admin">Admin</option>
+          </select>
         </div>
+        <button type="submit" disabled={isSending} className="w-full bg-[#F9A825] hover:bg-amber-600 text-white font-bold text-sm py-3 px-4 rounded-xl shadow-sm transition-colors cursor-pointer">{isSending ? 'Sending...' : 'Send Access Invite'}</button>
       </form>
+      {message && <div className={`mt-4 flex items-center gap-2 text-xs font-bold px-4 py-3 rounded-xl ${message.type === 'success' ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>{message.text}</div>}
     </div>
   );
 };

@@ -1,1 +1,18 @@
 @import "tailwindcss";
+/* At the very top of your global CSS file */
+/* @import url('https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'); */
+
+/* Append this to the absolute bottom of src/index.css or src/App.css */
+
+@layer utilities {
+  /* Class to hide standard scrollbar rails on Chrome, Safari, and Opera frameworks */
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+  
+  /* Class to hide standard scrollbars on IE, Edge, and Firefox installations */
+  .scrollbar-none {
+    -ms-overflow-style: none;  /* IE and Edge */
+    scrollbar-width: none;  /* Firefox */
+  }
+}
